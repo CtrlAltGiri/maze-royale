@@ -2,6 +2,10 @@
 import { drawFrame, DEATH_MS } from './render.js';
 
 const TICK_MS = 50;
+// Interpolation window bounds: never faster than one tick, never slower than
+// four so a burst of late snapshots eases in instead of snapping.
+const INTERP_MIN_MS = TICK_MS;
+const INTERP_MAX_MS = TICK_MS * 4;
 const KEY_DIRS = {
   ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
   w: 'up', s: 'down', a: 'left', d: 'right',
@@ -23,7 +27,8 @@ function el(tag, cls, text) {
 function lerp(a, b, t) { return a + (b - a) * t; }
 
 // Start a match on the #game canvas. net: {send(obj), on(type, handler) -> unsubscribe, playerId}.
-export function startGame(net, matchStart) {
+// hooks: {onPlayAgain(), onBackToLobby()} called after the standings overlay is dismissed.
+export function startGame(net, matchStart, hooks = {}) {
   const canvas = document.getElementById('game');
   const lobby = document.getElementById('lobby');
   const overlay = document.getElementById('overlay');
@@ -43,9 +48,20 @@ export function startGame(net, matchStart) {
   hud.innerHTML = '';
   hud.hidden = false;
   const hudTimer = el('span', 'hud-timer', fmtTime(matchStart.round_ms));
+  hudTimer.title = 'Time left';
   const hudAlive = el('span', 'hud-alive', '');
+  hudAlive.title = 'Runners alive';
   const hudStatus = el('span', 'hud-status', '');
-  hud.append(hudTimer, hudAlive, hudStatus);
+  hud.append(el('span', 'hud-label', 'Time'), hudTimer, el('span', 'hud-sep', '·'), el('span', 'hud-label', 'Alive'), hudAlive, hudStatus);
+
+  let banner = document.getElementById('spectator-banner');
+  if (!banner) {
+    banner = el('div');
+    banner.id = 'spectator-banner';
+    banner.setAttribute('role', 'status');
+    document.body.appendChild(banner);
+  }
+  banner.hidden = true;
 
   const myId = (matchStart.you && matchStart.you.player_id) || net.playerId;
   let spectating = !matchStart.you || matchStart.you.role !== 'runner';
@@ -56,8 +72,9 @@ export function startGame(net, matchStart) {
     info.set(p.player_id, { name: p.name, color: p.color || '#4fc3f7', x: p.x, y: p.y });
   }
 
-  // Snapshot buffer: interpolate from prev toward cur over one tick.
-  let prev = null, cur = null, curAt = 0;
+  // Snapshot buffer: interpolate from prev toward cur over the observed
+  // inter-snapshot interval (clamped), so jittery arrival does not snap.
+  let prev = null, cur = null, curAt = 0, interpMs = TICK_MS;
   const initial = {
     tick: 0, ts: 0, time_left_ms: matchStart.round_ms,
     alive_count: (matchStart.players || []).length,
@@ -73,16 +90,30 @@ export function startGame(net, matchStart) {
   const unsubs = [];
   let ended = false;
 
+  const totalRunners = (matchStart.players || []).length;
   function setStatus() {
-    hudAlive.textContent = `Alive: ${cur.alive_count}`;
-    hudStatus.textContent = spectating ? 'Spectating' : '';
+    hudAlive.textContent = `${cur.alive_count} / ${totalRunners}`;
+    hudStatus.textContent = spectating ? 'Spectating' : 'Arrows / WASD to move';
     hud.classList.toggle('spectating', spectating);
+    hudTimer.classList.toggle('urgent', cur.time_left_ms <= 10000);
+    banner.hidden = !spectating;
+    if (spectating) {
+      const you = matchStart.you || {};
+      const caught = deaths.has(myId) || deadIds.has(myId);
+      banner.textContent = caught
+        ? 'You were caught — spectating until the round ends'
+        : you.role === 'runner' ? 'Spectating' : 'Spectating — you joined after the round started';
+    }
   }
   setStatus();
 
   unsubs.push(net.on('snapshot', snap => {
     if (ended) return;
-    prev = cur; cur = snap; curAt = performance.now();
+    const now = performance.now();
+    if (cur && cur.tick > 0) {
+      interpMs = Math.min(INTERP_MAX_MS, Math.max(INTERP_MIN_MS, now - curAt));
+    }
+    prev = cur; cur = snap; curAt = now;
     hudTimer.textContent = fmtTime(snap.time_left_ms);
     for (const p of snap.players) {
       if (!p.alive && !deadIds.has(p.id) && !deaths.has(p.id)) {
@@ -123,7 +154,8 @@ export function startGame(net, matchStart) {
   function sendDir(dir) {
     if (dir === lastDir) return;
     lastDir = dir;
-    net.send({ t: 'input', seq: ++seq, dir });
+    if (typeof net.input === 'function') net.input(dir);
+    else net.send({ t: 'input', seq: ++seq, dir });
   }
   function onKeyDown(e) {
     const dir = KEY_DIRS[e.key];
@@ -156,7 +188,7 @@ export function startGame(net, matchStart) {
   // ---- render loop ----
   let raf = 0;
   function frame(now) {
-    const alpha = Math.min(1, Math.max(0, (now - curAt) / TICK_MS));
+    const alpha = Math.min(1, Math.max(0, (now - curAt) / interpMs));
     const prevById = new Map((prev.players || []).map(p => [p.id, p]));
     const prevCatch = new Map((prev.catchers || []).map(c => [c.id, c]));
 
@@ -204,13 +236,29 @@ export function startGame(net, matchStart) {
     unsubs.length = 0;
   }
 
+  function leaveMatch() {
+    stop();
+    overlay.hidden = true;
+    overlay.innerHTML = '';
+    hud.hidden = true;
+    banner.hidden = true;
+    canvas.hidden = true;
+    if (lobby) lobby.hidden = false;
+  }
+
   function showStandings(end) {
     overlay.innerHTML = '';
     overlay.hidden = false;
+    banner.hidden = true;
     const panel = el('div', 'panel');
     const winners = new Set(end.winner_ids || []);
     const youWon = winners.has(myId);
-    panel.append(el('h1', null, youWon ? 'You survived!' : winners.size ? 'Match over' : 'Nobody survived'));
+    const wasRunner = !!(matchStart.you && matchStart.you.role === 'runner');
+    panel.append(el('h1', null, youWon ? 'You survived!' : winners.size ? (wasRunner ? 'You were caught' : 'Match over') : 'Nobody survived'));
+    const winnerNames = rows(end).filter(s => winners.has(s.player_id)).map(s => s.name || s.player_id);
+    panel.append(el('p', 'muted', winnerNames.length
+      ? `Winner${winnerNames.length > 1 ? 's' : ''}: ${winnerNames.join(', ')}`
+      : 'The catchers got everyone.'));
     const table = el('table', 'standings');
     const thead = el('thead');
     const hr = el('tr');
@@ -218,8 +266,7 @@ export function startGame(net, matchStart) {
     thead.append(hr);
     table.append(thead);
     const tbody = el('tbody');
-    const rows = [...(end.standings || [])].sort((a, b) => a.place - b.place);
-    for (const s of rows) {
+    for (const s of rows(end)) {
       const tr = el('tr');
       if (winners.has(s.player_id)) tr.classList.add('winner');
       if (s.player_id === myId) tr.classList.add('you');
@@ -233,20 +280,28 @@ export function startGame(net, matchStart) {
     }
     table.append(tbody);
     panel.append(table);
-    const btn = el('button', 'primary', 'Back to lobby');
-    btn.addEventListener('click', () => {
-      stop();
-      overlay.hidden = true;
-      overlay.innerHTML = '';
-      hud.hidden = true;
-      canvas.hidden = true;
-      if (lobby) lobby.hidden = false;
+    const actions = el('div', 'actions');
+    const again = el('button', 'primary', 'Play again');
+    again.addEventListener('click', () => {
+      leaveMatch();
+      if (typeof hooks.onPlayAgain === 'function') hooks.onPlayAgain();
     });
-    panel.append(btn);
+    const back = el('button', null, 'Back to lobby');
+    back.addEventListener('click', () => {
+      leaveMatch();
+      if (typeof hooks.onBackToLobby === 'function') hooks.onBackToLobby();
+    });
+    actions.append(again, back);
+    panel.append(actions);
     overlay.append(panel);
+    again.focus();
   }
 
-  return { stop };
+  function rows(end) {
+    return [...(end.standings || [])].sort((a, b) => a.place - b.place);
+  }
+
+  return { stop, leave: leaveMatch };
 }
 
 // ---------------------------------------------------------------------------
