@@ -110,9 +110,9 @@ button.danger { background: var(--danger); border-color: transparent; }
 /* ---- game canvas ---- */
 #game {
   display: block;
-  margin: 3.25rem auto 1rem;
+  margin: 5.5rem auto 1rem;
   max-width: calc(100vw - 2rem);
-  max-height: calc(100vh - 4.5rem);
+  max-height: calc(100vh - 6.75rem);
   width: auto;
   height: auto;
   background: var(--bg);
@@ -141,10 +141,34 @@ button.danger { background: var(--danger); border-color: transparent; }
   z-index: 5;
   pointer-events: none;
 }
-#hud .hud-timer { color: var(--accent); min-width: 4ch; }
-#hud .hud-alive { color: var(--text); }
-#hud .hud-status { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.85rem; }
+#hud .hud-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; margin-right: -1.4rem; }
+#hud .hud-sep { color: var(--panel-border); }
+#hud .hud-timer { color: var(--accent); min-width: 4ch; font-size: 1.35rem; }
+#hud .hud-timer.urgent { color: #ff8a65; animation: hud-pulse 1s ease-in-out infinite; }
+#hud .hud-alive { color: var(--text); font-size: 1.35rem; }
+#hud .hud-status { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.8rem; margin-left: 1rem; }
 #hud.spectating .hud-status { color: #ffb74d; }
+@keyframes hud-pulse { 50% { opacity: 0.55; } }
+
+/* ---- spectator banner ---- */
+#spectator-banner {
+  position: fixed;
+  top: 3.1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.45rem 1.25rem;
+  background: rgba(255, 183, 77, 0.16);
+  border: 1px solid #ffb74d;
+  color: #ffcc80;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+  z-index: 6;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
 
 /* ---- overlay (standings) ---- */
 #overlay {
@@ -183,6 +207,10 @@ button.danger { background: var(--danger); border-color: transparent; }
 #overlay table.standings th { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; }
 #overlay table.standings td:first-child { font-weight: 700; color: var(--muted); width: 2.5rem; }
 #overlay table.standings td:last-child { font-variant-numeric: tabular-nums; }
+#overlay .panel h1 { font-size: 2rem; }
+#overlay .panel p.muted { margin: -0.25rem 0 0.5rem; }
+#overlay .actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+#overlay .actions button { min-width: 9rem; padding: 0.7rem 1.4rem; font-size: 1.05rem; }
 #overlay tr.winner td { color: var(--win); }
 #overlay tr.you td { background: rgba(79, 195, 247, 0.08); }
 #overlay tr.you td:nth-child(2)::after { content: " (you)"; color: var(--muted); font-weight: 400; }

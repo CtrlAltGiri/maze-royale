@@ -50,24 +50,49 @@ function toPx(lay, x, y) {
   return [lay.ox + x * lay.cell, lay.oy + y * lay.cell];
 }
 
-function drawTag(ctx, px, py, r, text) {
-  const size = Math.max(10, Math.round(r * 1.1));
+// Name tag: a rounded pill in the runner's color with dark or light text
+// chosen for contrast, clamped inside the canvas.
+function drawTag(ctx, px, py, r, text, color, dim) {
+  const size = Math.max(11, Math.round(r * 1.05));
+  ctx.save();
   ctx.font = `bold ${size}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
-  ctx.lineWidth = 3;
-  let ty = py - r - 3;
-  if (ty - size < 0) {
-    ctx.textBaseline = 'top';
-    ty = py + r + 3;
-  } else {
-    ctx.textBaseline = 'bottom';
-  }
-  const half = ctx.measureText(text).width / 2 + 2;
-  const tx = Math.min(Math.max(px, half), ctx.canvas.width - half);
+  ctx.textBaseline = 'middle';
+  const padX = 5, padY = 2;
+  const tw = ctx.measureText(text).width;
+  const bw = tw + padX * 2, bh = size + padY * 2;
+  let cy = py - r - 4 - bh / 2;
+  if (cy - bh / 2 < 0) cy = py + r + 4 + bh / 2;
+  cy = Math.min(Math.max(cy, bh / 2), ctx.canvas.height - bh / 2);
+  const cx = Math.min(Math.max(px, bw / 2), ctx.canvas.width - bw / 2);
+  if (dim) ctx.globalAlpha = 0.6;
+  ctx.fillStyle = color || '#555';
+  roundRect(ctx, cx - bw / 2, cy - bh / 2, bw, bh, bh / 2);
+  ctx.fill();
   ctx.strokeStyle = COLORS.tagShadow;
-  ctx.strokeText(text, tx, ty);
-  ctx.fillStyle = COLORS.tag;
-  ctx.fillText(text, tx, ty);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = isLight(color) ? '#111' : '#fff';
+  ctx.fillText(text, cx, cy + 0.5);
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, rad) {
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+
+function isLight(color) {
+  const m = /^#([0-9a-f]{6})$/i.exec(color || '');
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150;
 }
 
 // runner: {x, y, color, name, alive, isYou, deathProgress (0..1 or null)}
@@ -88,7 +113,7 @@ export function drawRunner(ctx, lay, runner) {
     ctx.arc(px, py, r * (1 - p), 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-    drawTag(ctx, px, py, r, runner.name);
+    drawTag(ctx, px, py, r, runner.name, runner.color, false);
     return;
   }
   if (!runner.alive) {
@@ -100,6 +125,7 @@ export function drawRunner(ctx, lay, runner) {
     ctx.moveTo(px + r * 0.6, py - r * 0.6); ctx.lineTo(px - r * 0.6, py + r * 0.6);
     ctx.stroke();
     ctx.restore();
+    if (runner.isYou) drawTag(ctx, px, py, r, runner.name, runner.color, true);
     return;
   }
   ctx.fillStyle = runner.color;
@@ -113,7 +139,7 @@ export function drawRunner(ctx, lay, runner) {
     ctx.arc(px, py, r + 3, 0, Math.PI * 2);
     ctx.stroke();
   }
-  drawTag(ctx, px, py, r, runner.name);
+  drawTag(ctx, px, py, r, runner.isYou ? `${runner.name} (you)` : runner.name, runner.color, false);
 }
 
 // catcher: {x, y, dir}

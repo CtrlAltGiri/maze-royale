@@ -25,6 +25,8 @@ const state = {
   inMatch: false,
   view: "home", // home | room
   ready: false,
+  copied: false,
+  copiedTimer: null,
 };
 
 const root = document.getElementById("lobby");
@@ -86,7 +88,25 @@ net.on("match_start", (msg) => {
   canvas.hidden = false;
   render();
   try {
-    startGame(net, msg);
+    startGame(net, msg, {
+      onPlayAgain: () => {
+        // The room is already back in the lobby (gateway called /end); just ready up.
+        if (state.room) {
+          state.view = "room";
+          state.ready = true;
+          net.setReady(true);
+        }
+        render();
+      },
+      onBackToLobby: () => {
+        if (state.room) net.leaveRoom();
+        state.room = null;
+        state.ready = false;
+        state.countdownMs = 0;
+        state.view = "home";
+        render();
+      },
+    });
   } catch (err) {
     console.error("lobby: startGame failed", err);
     showError(`client: ${err.message}`);
@@ -96,9 +116,37 @@ net.on("match_start", (msg) => {
 net.on("match_end", () => {
   state.inMatch = false;
   state.ready = false;
-  root.hidden = false;
+  state.countdownMs = 0;
   render();
 });
+
+function copyCode(code) {
+  const done = () => {
+    state.copied = true;
+    clearTimeout(state.copiedTimer);
+    state.copiedTimer = setTimeout(() => { state.copied = false; render(); }, 1500);
+    render();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(code).then(done, () => fallbackCopy(code) && done());
+  } else if (fallbackCopy(code)) {
+    done();
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+  ta.remove();
+  return ok;
+}
 
 function showError(text) {
   state.error = text;
@@ -259,7 +307,7 @@ function renderHome() {
     field("Min players (2-8)", h("input", { id: "cfg-min-players", name: "min_players", type: "number", min: 2, max: 8, step: 1, value: cfg.min_players, required: true })),
     field("Fill with bots", h("input", { id: "cfg-fill-bots", name: "fill_bots", type: "checkbox", checked: !!cfg.fill_bots })),
     field("Seed (optional)", h("input", { id: "cfg-seed", name: "seed", type: "text", inputmode: "numeric", placeholder: "random", value: cfg.seed ?? "" })),
-    h("button", { type: "submit", class: "primary" }, "Create room"),
+    h("button", { type: "submit", class: "primary", disabled: !state.connected, title: state.connected ? null : "waiting for connection" }, "Create room"),
   );
 
   const joinForm = h("form", {
@@ -277,8 +325,11 @@ function renderHome() {
     },
   },
     h("h2", null, "Join room"),
-    field("Room code", h("input", { id: "join-code", name: "code", type: "text", placeholder: "ABCD", autocomplete: "off", style: "text-transform: uppercase" })),
-    h("button", { type: "submit" }, "Join"),
+    field("Room code", h("input", {
+      id: "join-code", name: "code", type: "text", placeholder: "ABCD", autocomplete: "off",
+      autocapitalize: "characters", spellcheck: "false", maxlength: 8, class: "code-input",
+    })),
+    h("button", { type: "submit", class: "primary", disabled: !state.connected, title: state.connected ? null : "waiting for connection" }, "Join"),
   );
 
   return h("div", { class: "lobby-home" },
@@ -296,46 +347,67 @@ function renderRoom() {
   const me = room.players.find((p) => p.player_id === net.playerId);
   const isCreator = !!(me && me.is_creator);
   const remaining = remainingCountdown();
+  const counting = remaining > 0;
   const cfg = room.config || {};
+  const humans = room.players.filter((p) => !p.is_bot);
+  const readyCount = room.players.filter((p) => p.ready).length;
+  const minPlayers = cfg.min_players || 2;
+  const missing = Math.max(0, minPlayers - room.players.length);
+  const canStart = room.players.length >= 2 || !!cfg.fill_bots;
+
+  let hint;
+  if (counting) hint = null;
+  else if (missing > 0) hint = `Waiting for ${missing} more player${missing === 1 ? "" : "s"}` + (cfg.fill_bots ? " (bots will fill the rest)" : "") + "…";
+  else if (readyCount < room.players.length) hint = `${readyCount} / ${room.players.length} ready — starts when everyone is ready` + (isCreator ? " or you press Start now" : "");
+  else hint = "Everyone is ready — starting…";
 
   return h("div", { class: "lobby-room" },
     h("div", { class: "lobby-code" },
-      h("span", null, isCreator ? "Share this code:" : "Room code:"),
-      h("strong", { class: "code" }, room.code),
-      isCreator ? h("button", {
-        type: "button", class: "small",
-        onclick: () => navigator.clipboard && navigator.clipboard.writeText(room.code).catch(() => {}),
-      }, "copy") : null,
+      h("span", { class: "code-label" }, isCreator ? "Share this code" : "Room code"),
+      h("div", { class: "code-row" },
+        h("strong", {
+          class: "code", id: "room-code", title: "Click to copy", role: "button", tabindex: 0,
+          onclick: () => copyCode(room.code),
+          onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); copyCode(room.code); } },
+        }, room.code),
+        h("button", {
+          type: "button", class: state.copied ? "small copied" : "small",
+          onclick: () => copyCode(room.code),
+        }, state.copied ? "Copied!" : "Copy"),
+      ),
     ),
-    remaining > 0
-      ? h("div", { class: "lobby-countdown" }, "Starting in ", h("strong", null, (remaining / 1000).toFixed(1)), " s")
-      : null,
+    counting
+      ? h("div", { class: "lobby-countdown", role: "status" }, "Starting in ", h("strong", null, (remaining / 1000).toFixed(1)), " s")
+      : h("div", { class: "lobby-hint", role: "status" }, hint),
     h("div", { class: "lobby-config" },
       `${cfg.maze_size} maze · ${cfg.catchers} catcher${cfg.catchers === 1 ? "" : "s"} @ ${cfg.catcher_speed}× · ` +
       `${cfg.round_seconds}s round · min ${cfg.min_players} players` +
       (cfg.fill_bots ? " · bots fill" : "") +
       (cfg.seed != null ? ` · seed ${cfg.seed}` : ""),
     ),
+    h("h2", { class: "roster-title" }, `Players (${room.players.length}${humans.length !== room.players.length ? `, ${humans.length} human` : ""})`),
     h("ul", { class: "lobby-roster" },
       ...room.players.map((p) => h("li", { class: p.player_id === net.playerId ? "me" : null },
-        h("span", { class: "swatch", style: `background:${p.color || "#888"}` }),
-        h("span", { class: "name" }, p.name || p.player_id),
+        h("span", { class: "swatch", style: `background:${p.color || "#888"}`, title: p.color || "" }),
+        h("span", { class: "name" }, p.name || p.player_id, p.player_id === net.playerId ? h("span", { class: "you" }, " (you)") : null),
         p.is_creator ? h("span", { class: "badge creator", title: "room creator" }, "creator") : null,
         p.is_bot ? h("span", { class: "badge bot" }, "bot") : null,
-        h("span", { class: p.ready ? "ready yes" : "ready no" }, p.ready ? "ready" : "not ready"),
+        h("span", { class: p.ready ? "ready yes" : "ready no" }, p.ready ? "✓ ready" : "not ready"),
       )),
     ),
     h("div", { class: "lobby-actions" },
       h("button", {
-        type: "button", class: state.ready ? "" : "primary",
+        type: "button", class: state.ready ? "" : "primary", disabled: counting || !state.connected,
+        title: counting ? "match is starting" : null,
         onclick: () => { state.ready = !state.ready; net.setReady(state.ready); render(); },
       }, state.ready ? "Unready" : "Ready"),
       isCreator ? h("button", {
-        type: "button", class: "primary", disabled: remaining > 0 || room.players.length < 1,
+        type: "button", class: "primary", disabled: counting || !canStart || !state.connected,
+        title: counting ? "match is starting" : !canStart ? "need at least 2 players (or fill with bots)" : "start without waiting for everyone to be ready",
         onclick: () => net.startRoom(),
       }, "Start now") : null,
       h("button", {
-        type: "button",
+        type: "button", disabled: counting, title: counting ? "match is starting" : null,
         onclick: () => {
           net.leaveRoom();
           state.room = null;
