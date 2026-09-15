@@ -4,20 +4,20 @@ import "encoding/json"
 
 // Service ports and base URLs. Every service is its own process on localhost.
 const (
-	PortGateway     = 8080
-	PortMatchmaking = 8081
-	PortSimulation  = 8082
-	PortMaze        = 8083
-	PortStats       = 8084
+	PortGateway     = 8090
+	PortMatchmaking = 8091
+	PortSimulation  = 8092
+	PortMaze        = 8093
+	PortStats       = 8094
 
-	GatewayURL     = "http://localhost:8080"
-	MatchmakingURL = "http://localhost:8081"
-	SimulationURL  = "http://localhost:8082"
-	MazeURL        = "http://localhost:8083"
-	StatsURL       = "http://localhost:8084"
+	GatewayURL     = "http://localhost:8090"
+	MatchmakingURL = "http://localhost:8091"
+	SimulationURL  = "http://localhost:8092"
+	MazeURL        = "http://localhost:8093"
+	StatsURL       = "http://localhost:8094"
 )
 
-// ---- maze service (8083) ----
+// ---- maze service (8093) ----
 
 // MazeGenerateRequest: POST /generate
 type MazeGenerateRequest struct {
@@ -43,7 +43,7 @@ type MazeGenerateResponse struct {
 	CatcherSpawns []Point `json:"catcher_spawns"`
 }
 
-// ---- matchmaking service (8081) ----
+// ---- matchmaking service (8091) ----
 // Gateway forwards lobby intents here; matchmaking returns the room state to fan out.
 
 // MMCreateRoomRequest: POST /rooms
@@ -84,7 +84,7 @@ type MMRoomResponse struct {
 	Recipients []string  `json:"recipients"`
 }
 
-// ---- simulation service (8082) ----
+// ---- simulation service (8092) ----
 
 // SimCreateMatchRequest: POST /matches. Called by matchmaking when a room starts.
 type SimCreateMatchRequest struct {
@@ -114,7 +114,7 @@ type SimMatchStateResponse struct {
 	Ended    bool       `json:"ended"`
 }
 
-// ---- simulation -> gateway push (8080) ----
+// ---- simulation -> gateway push (8090) ----
 
 // GatewayPush: POST /internal/push. Simulation and matchmaking deliver frames
 // to the gateway, which fans them out. Frames is a list of already encoded
@@ -129,7 +129,7 @@ type GatewayPush struct {
 	Frames    []json.RawMessage `json:"frames"`
 }
 
-// ---- stats service (8084) ----
+// ---- stats service (8094) ----
 
 // StatsResultRequest: POST /results. Sent by simulation at match end.
 type StatsResultRequest struct {

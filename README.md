@@ -4,7 +4,7 @@ Top down, multiplayer, last runner standing maze game. Runs entirely on one
 laptop; players use separate browser tabs on localhost.
 
 ```
-make run          # start all five services (http://localhost:8080)
+make run          # start all five services (http://localhost:8090)
 make test         # go test ./...
 make vet          # go vet ./...
 ```

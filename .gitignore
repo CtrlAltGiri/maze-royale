@@ -1,4 +1,5 @@
 bin/
+.demo/
 data/*
 !data/.gitkeep
 *.log

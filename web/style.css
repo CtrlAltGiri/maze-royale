@@ -110,9 +110,9 @@ button.danger { background: var(--danger); border-color: transparent; }
 /* ---- game canvas ---- */
 #game {
   display: block;
-  margin: 5.5rem auto 1rem;
+  margin: 8rem auto 1rem;
   max-width: calc(100vw - 2rem);
-  max-height: calc(100vh - 6.75rem);
+  max-height: calc(100vh - 9rem);
   width: auto;
   height: auto;
   background: var(--bg);
@@ -127,12 +127,13 @@ button.danger { background: var(--danger); border-color: transparent; }
   top: 0;
   left: 0;
   right: 0;
-  height: 2.75rem;
+  min-height: 2.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2rem;
-  padding: 0 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  padding: 0.3rem 1rem;
   background: rgba(17, 17, 17, 0.92);
   border-bottom: 1px solid var(--panel-border);
   font-variant-numeric: tabular-nums;
@@ -148,12 +149,41 @@ button.danger { background: var(--danger); border-color: transparent; }
 #hud .hud-alive { color: var(--text); font-size: 1.35rem; }
 #hud .hud-status { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.8rem; margin-left: 1rem; }
 #hud.spectating .hud-status { color: #ffb74d; }
+#hud .hud-powers {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+#hud .power-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.15rem 0.7rem;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+}
+#hud .power-badge.speed {
+  color: #ffd54f;
+  border: 1px solid #ffd54f;
+  background: rgba(255, 213, 79, 0.12);
+}
+#hud .power-badge.invisibility {
+  color: #ce93d8;
+  border: 1px solid #ce93d8;
+  background: rgba(206, 147, 216, 0.12);
+}
+#hud .power-hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
 @keyframes hud-pulse { 50% { opacity: 0.55; } }
 
 /* ---- spectator banner ---- */
 #spectator-banner {
   position: fixed;
-  top: 3.1rem;
+  top: 5.3rem;
   left: 50%;
   transform: translateX(-50%);
   padding: 0.45rem 1.25rem;
@@ -214,3 +244,8 @@ button.danger { background: var(--danger); border-color: transparent; }
 #overlay tr.winner td { color: var(--win); }
 #overlay tr.you td { background: rgba(79, 195, 247, 0.08); }
 #overlay tr.you td:nth-child(2)::after { content: " (you)"; color: var(--muted); font-weight: 400; }
+
+@media (max-width: 640px) {
+  #hud .power-hint { flex-basis: 100%; text-align: center; font-size: 0.7rem; }
+  #hud .hud-status { display: none; }
+}

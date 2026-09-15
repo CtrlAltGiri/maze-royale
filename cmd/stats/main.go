@@ -1,4 +1,4 @@
-// Command stats runs the stats service on port 8084.
+// Command stats runs the stats service on port 8094.
 package main
 
 import (

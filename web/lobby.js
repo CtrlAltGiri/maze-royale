@@ -222,7 +222,7 @@ function readConfig(form) {
     cfg.seed = Number(seed);
   }
   if (!["small", "medium", "large"].includes(cfg.maze_size)) throw new Error("maze size must be small, medium or large");
-  if (!Number.isInteger(cfg.catchers) || cfg.catchers < 1 || cfg.catchers > 4) throw new Error("catchers must be 1-4");
+  if (!Number.isSafeInteger(cfg.catchers) || cfg.catchers < 1) throw new Error("catchers must be a positive whole number");
   if (!(cfg.catcher_speed >= 0.6 && cfg.catcher_speed <= 1.4)) throw new Error("catcher speed must be 0.6-1.4");
   if (!Number.isInteger(cfg.round_seconds) || cfg.round_seconds < 30 || cfg.round_seconds > 300) throw new Error("round seconds must be 30-300");
   if (!Number.isInteger(cfg.min_players) || cfg.min_players < 2 || cfg.min_players > 8) throw new Error("min players must be 2-8");
@@ -322,7 +322,7 @@ function renderHome() {
     field("Maze size", h("select", { id: "cfg-maze-size", name: "maze_size" },
       ...[["small", "small (15×15)"], ["medium", "medium (21×21)"], ["large", "large (31×31)"]].map(([v, label]) =>
         h("option", { value: v, selected: cfg.maze_size === v }, label)))),
-    field("Catchers (1-4)", h("input", { id: "cfg-catchers", name: "catchers", type: "number", min: 1, max: 4, step: 1, value: cfg.catchers, required: true })),
+    field("Catchers (1+)", h("input", { id: "cfg-catchers", name: "catchers", type: "number", min: 1, step: 1, value: cfg.catchers, required: true })),
     field("Catcher speed (0.6-1.4)", h("input", { id: "cfg-catcher-speed", name: "catcher_speed", type: "number", min: 0.6, max: 1.4, step: 0.1, value: cfg.catcher_speed, required: true })),
     field("Round seconds (30-300)", h("input", { id: "cfg-round-seconds", name: "round_seconds", type: "number", min: 30, max: 300, step: 1, value: cfg.round_seconds, required: true })),
     field("Min players (2-8)", h("input", { id: "cfg-min-players", name: "min_players", type: "number", min: 2, max: 8, step: 1, value: cfg.min_players, required: true })),

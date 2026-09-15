@@ -1,6 +1,6 @@
 // Package gateway serves the static client, terminates player websockets at /ws,
 // routes intents to matchmaking and simulation, and fans snapshots out per
-// room. Port 8080.
+// room. Port 8090.
 package gateway
 
 import (

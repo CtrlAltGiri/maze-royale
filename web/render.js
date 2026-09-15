@@ -12,6 +12,8 @@ const COLORS = {
   tag: '#eee',
   tagShadow: 'rgba(0,0,0,0.85)',
   dead: 'rgba(200,200,200,0.35)',
+  speed: '#ffd54f',
+  invisibility: '#ce93d8',
 };
 
 // Compute cell size and offset so the whole maze fits centered on the canvas.
@@ -95,6 +97,48 @@ function isLight(color) {
   return (0.299 * r + 0.587 * g + 0.114 * b) > 150;
 }
 
+export function drawPowerUp(ctx, lay, power, now = 0) {
+  const [px, py] = toPx(lay, power.x, power.y);
+  const r = lay.cell * 0.23;
+  const pulse = 1 + 0.1 * Math.sin(now / 220);
+  const col = power.kind === 'invisibility' ? COLORS.invisibility : COLORS.speed;
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.scale(pulse, pulse);
+  ctx.strokeStyle = col;
+  ctx.fillStyle = col;
+  ctx.lineWidth = Math.max(1.5, r * 0.18);
+  ctx.globalAlpha = 0.85;
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 1.6);
+  ctx.lineTo(r * 1.6, 0);
+  ctx.lineTo(0, r * 1.6);
+  ctx.lineTo(-r * 1.6, 0);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  if (power.kind === 'invisibility') {
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.7, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.16, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    const bolt = [[.2, -.9], [-.55, .1], [-.05, .1], [-.2, .9], [.55, -.15], [.05, -.15]];
+    ctx.beginPath();
+    ctx.moveTo(bolt[0][0] * r, bolt[0][1] * r);
+    for (let i = 1; i < bolt.length; i++) ctx.lineTo(bolt[i][0] * r, bolt[i][1] * r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = Math.max(1, r * 0.1);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // runner: {x, y, color, name, alive, isYou, deathProgress (0..1 or null)}
 export function drawRunner(ctx, lay, runner) {
   const [px, py] = toPx(lay, runner.x, runner.y);
@@ -128,6 +172,8 @@ export function drawRunner(ctx, lay, runner) {
     if (runner.isYou) drawTag(ctx, px, py, r, runner.name, runner.color, true);
     return;
   }
+  ctx.save();
+  if (runner.invisible) ctx.globalAlpha = 0.35;
   ctx.fillStyle = runner.color;
   ctx.beginPath();
   ctx.arc(px, py, r, 0, Math.PI * 2);
@@ -139,7 +185,24 @@ export function drawRunner(ctx, lay, runner) {
     ctx.arc(px, py, r + 3, 0, Math.PI * 2);
     ctx.stroke();
   }
+  if (runner.invisible) {
+    ctx.strokeStyle = COLORS.invisibility;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(px, py, r + 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (runner.speedBoost) {
+    ctx.strokeStyle = COLORS.speed;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(px, py, r + 9, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   drawTag(ctx, px, py, r, runner.isYou ? `${runner.name} (you)` : runner.name, runner.color, false);
+  ctx.restore();
 }
 
 // catcher: {x, y, dir}
@@ -173,6 +236,7 @@ export function drawFrame(ctx, canvas, scene) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const lay = layout(canvas, scene.maze);
   drawMaze(ctx, scene.maze, lay);
+  for (const p of scene.powerUps || []) drawPowerUp(ctx, lay, p, scene.now || 0);
   for (const r of scene.runners) if (!r.alive && r.deathProgress == null) drawRunner(ctx, lay, r);
   for (const c of scene.catchers) drawCatcher(ctx, lay, c);
   for (const r of scene.runners) if (r.alive || r.deathProgress != null) drawRunner(ctx, lay, r);

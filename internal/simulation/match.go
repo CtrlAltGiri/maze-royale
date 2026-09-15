@@ -3,6 +3,7 @@ package simulation
 import (
 	"encoding/json"
 	"math"
+	"math/rand"
 	"sort"
 	"sync"
 
@@ -24,6 +25,8 @@ type runner struct {
 	seq             int64
 	alive           bool
 	survivedMS      int64
+	speedUntil      int64
+	invisibleUntil  int64
 }
 
 type catcher struct {
@@ -49,6 +52,9 @@ type Match struct {
 	ended    bool
 	winners  []string
 	last     protocol.Snapshot
+
+	powerUps   []pickup
+	powerUpRNG *rand.Rand
 }
 
 // StepResult is what one tick produced.
@@ -103,6 +109,7 @@ func (m *Match) StartFor(playerID, role string) protocol.MatchStart {
 func (m *Match) startFor(playerID, role string) protocol.MatchStart {
 	s := m.start
 	s.You = protocol.You{PlayerID: playerID, Role: role}
+	s.PowerUps = m.activePowerUps()
 	for _, r := range m.runners {
 		if r.id == playerID {
 			s.You.Color = r.color
@@ -133,13 +140,22 @@ func (m *Match) Step(nowMS int64) StepResult {
 	m.tick++
 	elapsed := m.tick * int64(protocol.TickMillis)
 
+	m.respawnPowerUps()
+	var frames []json.RawMessage
 	var runnerPos []gridmath.Vec
 	for _, r := range m.runners {
 		if !r.alive {
 			continue
 		}
-		r.pos, r.moving = m.grid.Step(r.pos, r.want, protocol.RunnerSpeed, tickDT)
-		runnerPos = append(runnerPos, r.pos)
+		speed := protocol.RunnerSpeed
+		if m.tick < r.speedUntil {
+			speed *= protocol.PowerUpSpeedMultiplier
+		}
+		r.pos, r.moving = m.grid.Step(r.pos, r.want, speed, tickDT)
+		frames = append(frames, m.collectPowerUps(r)...)
+		if m.tick >= r.invisibleUntil {
+			runnerPos = append(runnerPos, r.pos)
+		}
 	}
 	others := make([]gridmath.Vec, 0, len(m.catchers))
 	for i, c := range m.catchers {
@@ -152,12 +168,12 @@ func (m *Match) Step(nowMS int64) StepResult {
 		m.moveCatcher(c, runnerPos, others)
 	}
 
-	var frames []json.RawMessage
 	for _, c := range m.catchers {
 		for _, r := range m.runners {
-			if r.alive && gridmath.Caught(c.pos, r.pos) {
+			if r.alive && m.tick >= r.invisibleUntil && gridmath.Caught(c.pos, r.pos) {
 				r.alive = false
 				r.survivedMS = elapsed
+				r.speedUntil, r.invisibleUntil = 0, 0
 				frames = append(frames, encode(protocol.Event{
 					T: protocol.TypeEvent, Kind: protocol.EventCaught,
 					PlayerID: r.id, CatcherID: c.id, Tick: m.tick,
@@ -259,8 +275,10 @@ func (m *Match) snapshot(nowMS, timeLeft int64, alive int) protocol.Snapshot {
 		if !r.alive {
 			dir = protocol.DirNone
 		}
-		s.Players = append(s.Players, protocol.SnapshotPlayer{ID: r.id, X: r.pos.X, Y: r.pos.Y, Dir: dir, Alive: r.alive})
+		s.Players = append(s.Players, protocol.SnapshotPlayer{ID: r.id, X: r.pos.X, Y: r.pos.Y, Dir: dir, Alive: r.alive,
+			SpeedBoostMS: m.effectMS(r.speedUntil), InvisibleMS: m.effectMS(r.invisibleUntil)})
 	}
+	s.PowerUps = m.activePowerUps()
 	for _, c := range m.catchers {
 		s.Catchers = append(s.Catchers, protocol.SnapshotCatcher{ID: c.id, X: c.pos.X, Y: c.pos.Y, Dir: c.dir})
 	}

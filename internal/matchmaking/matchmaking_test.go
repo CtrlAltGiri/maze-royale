@@ -213,7 +213,7 @@ func TestCreateRoom(t *testing.T) {
 func TestCreateRoomValidation(t *testing.T) {
 	e := newEnv(t)
 	bad := cfg(2, false)
-	bad.Catchers = 9
+	bad.Catchers = -1
 	e.mustFail("POST", "/rooms", protocol.MMCreateRoomRequest{PlayerID: "p1", Config: bad}, http.StatusBadRequest, protocol.ErrBadRequest)
 	bad = cfg(2, false)
 	bad.MazeSize = "huge"

@@ -39,9 +39,10 @@ const (
 
 // Event kinds carried by Event.Kind.
 const (
-	EventCaught    = "caught"
-	EventCountdown = "countdown"
-	EventBotJoined = "bot_joined"
+	EventCaught           = "caught"
+	EventCountdown        = "countdown"
+	EventBotJoined        = "bot_joined"
+	EventPowerUpCollected = "power_up_collected"
 )
 
 // Roles assigned to entities in a match.
@@ -89,10 +90,26 @@ const (
 	ServerTickHz = TickRate
 )
 
+const (
+	PowerUpSpeed           = "speed"
+	PowerUpInvisibility    = "invisibility"
+	PowerUpSpeedMultiplier = 1.5
+	PowerUpSpeedMS         = 5000
+	PowerUpInvisibilityMS  = 3000
+	PowerUpRespawnMS       = 8000
+	PowerUpRadius          = 0.35
+)
+
+type PowerUp struct {
+	ID   string  `json:"id"`
+	Kind string  `json:"kind"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+}
+
 // Room configuration limits.
 const (
 	MinCatchers     = 1
-	MaxCatchers     = 4
 	MinCatcherSpeed = 0.6
 	MaxCatcherSpeed = 1.4
 	MinRoundSeconds = 30
@@ -130,7 +147,7 @@ type Envelope struct {
 // RoomConfig is the configuration a creator sets on a room.
 type RoomConfig struct {
 	MazeSize     string  `json:"maze_size"`     // small | medium | large
-	Catchers     int     `json:"catchers"`      // 1..4
+	Catchers     int     `json:"catchers"`      // positive integer; subject to maze spawn capacity
 	CatcherSpeed float64 `json:"catcher_speed"` // 0.6..1.4
 	RoundSeconds int     `json:"round_seconds"` // 30..300
 	MinPlayers   int     `json:"min_players"`   // 2..8
@@ -143,8 +160,8 @@ func (c RoomConfig) Validate() error {
 	if _, ok := MazeDimension(c.MazeSize); !ok {
 		return fmt.Errorf("maze_size must be small, medium or large")
 	}
-	if c.Catchers < MinCatchers || c.Catchers > MaxCatchers {
-		return fmt.Errorf("catchers must be between %d and %d", MinCatchers, MaxCatchers)
+	if c.Catchers < MinCatchers {
+		return fmt.Errorf("catchers must be at least %d", MinCatchers)
 	}
 	if c.CatcherSpeed < MinCatcherSpeed || c.CatcherSpeed > MaxCatcherSpeed {
 		return fmt.Errorf("catcher_speed must be between %.1f and %.1f", MinCatcherSpeed, MaxCatcherSpeed)
@@ -297,16 +314,19 @@ type MatchStart struct {
 	You      You            `json:"you"`
 	Players  []MatchPlayer  `json:"players"`
 	Catchers []MatchCatcher `json:"catchers"`
+	PowerUps []PowerUp      `json:"power_ups"`
 	RoundMS  int64          `json:"round_ms"`
 }
 
 // SnapshotPlayer is a runner's authoritative state at a tick.
 type SnapshotPlayer struct {
-	ID    string    `json:"id"`
-	X     float64   `json:"x"`
-	Y     float64   `json:"y"`
-	Dir   Direction `json:"dir"`
-	Alive bool      `json:"alive"`
+	ID           string    `json:"id"`
+	X            float64   `json:"x"`
+	Y            float64   `json:"y"`
+	Dir          Direction `json:"dir"`
+	Alive        bool      `json:"alive"`
+	SpeedBoostMS int64     `json:"speed_boost_ms,omitempty"`
+	InvisibleMS  int64     `json:"invisible_ms,omitempty"`
 }
 
 // SnapshotCatcher is a catcher's authoritative state at a tick.
@@ -323,6 +343,7 @@ type Snapshot struct {
 	TS         int64             `json:"ts"` // server unix millis
 	Players    []SnapshotPlayer  `json:"players"`
 	Catchers   []SnapshotCatcher `json:"catchers"`
+	PowerUps   []PowerUp         `json:"power_ups"`
 	TimeLeftMS int64             `json:"time_left_ms"`
 	AliveCount int               `json:"alive_count"`
 }
@@ -333,13 +354,15 @@ type Snapshot struct {
 //   - countdown:  MS remaining until start
 //   - bot_joined: PlayerID, Name
 type Event struct {
-	T         string `json:"t"`
-	Kind      string `json:"kind"`
-	PlayerID  string `json:"player_id,omitempty"`
-	CatcherID string `json:"catcher_id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Tick      int64  `json:"tick,omitempty"`
-	MS        int64  `json:"ms,omitempty"`
+	T           string `json:"t"`
+	Kind        string `json:"kind"`
+	PlayerID    string `json:"player_id,omitempty"`
+	CatcherID   string `json:"catcher_id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Tick        int64  `json:"tick,omitempty"`
+	MS          int64  `json:"ms,omitempty"`
+	PowerUpID   string `json:"power_up_id,omitempty"`
+	PowerUpKind string `json:"power_up_kind,omitempty"`
 }
 
 // Standing is one row of the end of match results.

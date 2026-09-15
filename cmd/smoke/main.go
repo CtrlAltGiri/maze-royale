@@ -4,7 +4,7 @@
 // match_start, snapshots to both clients, a caught event, match_end and the
 // result on the leaderboard.
 //
-// Usage: go run ./cmd/smoke [-gateway ws://localhost:8080]
+// Usage: go run ./cmd/smoke [-gateway ws://localhost:8090]
 package main
 
 import (
@@ -16,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,8 +89,8 @@ func (c *client) waitFor(what string, timeout time.Duration, pred func(any) bool
 }
 
 func main() {
-	gw := flag.String("gateway", "ws://localhost:8080", "gateway websocket base URL")
-	httpGW := flag.String("http", "http://localhost:8080", "gateway http base URL")
+	gw := flag.String("gateway", "ws://localhost:8090", "gateway websocket base URL")
+	httpGW := flag.String("http", protocol.GatewayURL, "gateway http base URL")
 	flag.Parse()
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 
@@ -282,7 +283,7 @@ loop:
 	if !strings.Contains(body, "alice") || !strings.Contains(body, "bob") {
 		log.Fatalf("leaderboard does not list both players:\n%s", body)
 	}
-	resp, err := http.Get(strings.Replace(*httpGW, "8080", "8084", 1) + "/leaderboard")
+	resp, err := http.Get(strings.Replace(*httpGW, strconv.Itoa(protocol.PortGateway), strconv.Itoa(protocol.PortStats), 1) + "/leaderboard")
 	if err == nil {
 		var lb protocol.LeaderboardResponse
 		_ = json.NewDecoder(resp.Body).Decode(&lb)

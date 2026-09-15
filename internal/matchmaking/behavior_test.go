@@ -320,15 +320,15 @@ func TestConfigValidationBoundaries(t *testing.T) {
 	e := newEnv(t)
 	type mut func(c *protocol.RoomConfig)
 	bad := map[string]mut{
-		"catchers low":   func(c *protocol.RoomConfig) { c.Catchers = protocol.MinCatchers - 1 },
-		"catchers high":  func(c *protocol.RoomConfig) { c.Catchers = protocol.MaxCatchers + 1 },
-		"speed low":      func(c *protocol.RoomConfig) { c.CatcherSpeed = protocol.MinCatcherSpeed - 0.05 },
-		"speed high":     func(c *protocol.RoomConfig) { c.CatcherSpeed = protocol.MaxCatcherSpeed + 0.05 },
-		"round low":      func(c *protocol.RoomConfig) { c.RoundSeconds = protocol.MinRoundSeconds - 1 },
-		"round high":     func(c *protocol.RoomConfig) { c.RoundSeconds = protocol.MaxRoundSeconds + 1 },
-		"min players 1":  func(c *protocol.RoomConfig) { c.MinPlayers = protocol.MinMinPlayers - 1 },
-		"min players 9":  func(c *protocol.RoomConfig) { c.MinPlayers = protocol.MaxMinPlayers + 1 },
-		"maze size case": func(c *protocol.RoomConfig) { c.MazeSize = "Small" },
+		"catchers low":      func(c *protocol.RoomConfig) { c.Catchers = protocol.MinCatchers - 1 },
+		"catchers negative": func(c *protocol.RoomConfig) { c.Catchers = -1 },
+		"speed low":         func(c *protocol.RoomConfig) { c.CatcherSpeed = protocol.MinCatcherSpeed - 0.05 },
+		"speed high":        func(c *protocol.RoomConfig) { c.CatcherSpeed = protocol.MaxCatcherSpeed + 0.05 },
+		"round low":         func(c *protocol.RoomConfig) { c.RoundSeconds = protocol.MinRoundSeconds - 1 },
+		"round high":        func(c *protocol.RoomConfig) { c.RoundSeconds = protocol.MaxRoundSeconds + 1 },
+		"min players 1":     func(c *protocol.RoomConfig) { c.MinPlayers = protocol.MinMinPlayers - 1 },
+		"min players 9":     func(c *protocol.RoomConfig) { c.MinPlayers = protocol.MaxMinPlayers + 1 },
+		"maze size case":    func(c *protocol.RoomConfig) { c.MazeSize = "Small" },
 		"maze size empty": func(c *protocol.RoomConfig) {
 			c.MazeSize = ""
 			c.Catchers = 3 // non-zero config so it is not replaced by the defaults
@@ -347,9 +347,11 @@ func TestConfigValidationBoundaries(t *testing.T) {
 			c.MazeSize, c.Catchers, c.CatcherSpeed, c.RoundSeconds, c.MinPlayers = protocol.MazeSmall, protocol.MinCatchers, protocol.MinCatcherSpeed, protocol.MinRoundSeconds, protocol.MinMinPlayers
 		},
 		"max bounds": func(c *protocol.RoomConfig) {
-			c.MazeSize, c.Catchers, c.CatcherSpeed, c.RoundSeconds, c.MinPlayers = protocol.MazeLarge, protocol.MaxCatchers, protocol.MaxCatcherSpeed, protocol.MaxRoundSeconds, protocol.MaxMinPlayers
+			c.MazeSize, c.Catchers, c.CatcherSpeed, c.RoundSeconds, c.MinPlayers = protocol.MazeLarge, 32, protocol.MaxCatcherSpeed, protocol.MaxRoundSeconds, protocol.MaxMinPlayers
 		},
-		"fill bots": func(c *protocol.RoomConfig) { c.FillBots = true },
+		"five catchers":      func(c *protocol.RoomConfig) { c.Catchers = 5 },
+		"seventeen catchers": func(c *protocol.RoomConfig) { c.Catchers = 17 },
+		"fill bots":          func(c *protocol.RoomConfig) { c.FillBots = true },
 	}
 	for name, m := range good {
 		c := protocol.DefaultRoomConfig()

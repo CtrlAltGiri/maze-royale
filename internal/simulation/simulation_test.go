@@ -202,7 +202,7 @@ func TestCreateMatchAndSpectatorState(t *testing.T) {
 func TestCreateMatchRejectsBadConfig(t *testing.T) {
 	f := newFixture(t, protocol.MazeGenerateResponse{}, nil)
 	req := twoRunnerRequest()
-	req.Config.Catchers = 9
+	req.Config.Catchers = -1
 	if w := postJSON(t, f.svc.Handler(), "/matches", req, nil); w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 got %d", w.Code)
 	}

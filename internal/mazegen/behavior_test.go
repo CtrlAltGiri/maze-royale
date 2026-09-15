@@ -61,7 +61,7 @@ func TestEveryCellReachableFromEverySpawnAcrossSeedsAndSizes(t *testing.T) {
 
 func TestSpawnSeparationHoldsForMaxCountsAndOddRequests(t *testing.T) {
 	cases := []struct{ runners, catchers int }{
-		{1, 1}, {2, 1}, {8, 1}, {8, 4}, {protocol.MaxMinPlayers, protocol.MaxCatchers}, {16, 4}, {1, 4},
+		{1, 1}, {2, 1}, {8, 1}, {8, 4}, {protocol.MaxMinPlayers, 4}, {protocol.MaxMinPlayers, 17}, {16, 4}, {1, 4},
 	}
 	for _, n := range allSizes(t) {
 		for _, tc := range cases {
@@ -97,7 +97,7 @@ func TestSpawnSeparationHoldsForMaxCountsAndOddRequests(t *testing.T) {
 func TestFirstCatcherSpawnsAtCenterAndOthersNearby(t *testing.T) {
 	for _, n := range allSizes(t) {
 		for seed := int64(1); seed <= 10; seed++ {
-			res := gen(t, n, seed, 4, protocol.MaxCatchers)
+			res := gen(t, n, seed, 4, 4)
 			center := gridmath.Cell{X: n / 2, Y: n / 2}
 			if got := cellOf(res.CatcherSpawns[0]); got != center {
 				t.Fatalf("%dx%d seed %d: first catcher at %v, want center %v", n, n, seed, got, center)
@@ -213,7 +213,7 @@ func TestCheckConnectedRejectsBrokenMazes(t *testing.T) {
 func TestValidateBoundaries(t *testing.T) {
 	ok := []protocol.MazeGenerateRequest{
 		{W: MinSide, H: MinSide},
-		{W: MaxSide, H: MaxSide, Runners: MaxRunners, Catchers: MaxCatchers},
+		{W: MaxSide, H: MaxSide, Runners: MaxRunners, Catchers: MaxSide * MaxSide},
 	}
 	for _, r := range ok {
 		if err := Validate(r); err != nil {
@@ -227,6 +227,7 @@ func TestValidateBoundaries(t *testing.T) {
 		{W: 0, H: 0},
 		{W: 15, H: 15, Runners: MaxRunners + 1},
 		{W: 15, H: 15, Catchers: -1},
+		{W: 15, H: 15, Catchers: 15*15 + 1},
 	}
 	for _, r := range bad {
 		if err := Validate(r); err == nil {
@@ -235,7 +236,7 @@ func TestValidateBoundaries(t *testing.T) {
 	}
 	// The contract sizes all validate.
 	for _, n := range allSizes(t) {
-		if err := Validate(protocol.MazeGenerateRequest{W: n, H: n, Runners: protocol.MaxMinPlayers, Catchers: protocol.MaxCatchers}); err != nil {
+		if err := Validate(protocol.MazeGenerateRequest{W: n, H: n, Runners: protocol.MaxMinPlayers, Catchers: 4}); err != nil {
 			t.Fatalf("contract size %d: %v", n, err)
 		}
 	}
@@ -246,7 +247,7 @@ func TestSmallestMazeStillSeatsFullRoom(t *testing.T) {
 	// fit for the separation rule; the generator must report an error rather
 	// than violate it, and the 15x15 small contract size must always succeed.
 	for seed := int64(1); seed <= 20; seed++ {
-		res, err := Generate(protocol.MazeGenerateRequest{W: MinSide, H: MinSide, Seed: seed, Runners: protocol.MaxMinPlayers, Catchers: protocol.MaxCatchers})
+		res, err := Generate(protocol.MazeGenerateRequest{W: MinSide, H: MinSide, Seed: seed, Runners: protocol.MaxMinPlayers, Catchers: 4})
 		if err != nil {
 			continue
 		}
@@ -259,6 +260,6 @@ func TestSmallestMazeStillSeatsFullRoom(t *testing.T) {
 		}
 	}
 	for seed := int64(1); seed <= 50; seed++ {
-		gen(t, 15, seed, protocol.MaxMinPlayers, protocol.MaxCatchers)
+		gen(t, 15, seed, protocol.MaxMinPlayers, 4)
 	}
 }

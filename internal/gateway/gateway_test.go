@@ -376,10 +376,22 @@ func TestPushMatchStartInputAndReconnect(t *testing.T) {
 	}
 
 	// room-wide snapshot
-	e.push(protocol.GatewayPush{MatchID: "m1", RoomCode: "ABCD", Frames: []json.RawMessage{raw(t, protocol.Snapshot{T: protocol.TypeSnapshot, Tick: 7})}})
+	roomSnap := protocol.Snapshot{T: protocol.TypeSnapshot, Tick: 7,
+		Players:  []protocol.SnapshotPlayer{{ID: a.id, X: 1.5, Y: 0.5, Dir: protocol.DirRight, Alive: true, SpeedBoostMS: 2500}, {ID: b.id, X: 2.5, Y: 2.5, Dir: protocol.DirNone, Alive: true, InvisibleMS: 1000}},
+		Catchers: []protocol.SnapshotCatcher{{ID: "c1", X: 0.5, Y: 0.5, Dir: protocol.DirUp}},
+		PowerUps: []protocol.PowerUp{{ID: "power1", Kind: protocol.PowerUpSpeed, X: 1.5, Y: 1.5}, {ID: "power2", Kind: protocol.PowerUpInvisibility, X: 3.5, Y: 0.5}},
+	}
+	e.push(protocol.GatewayPush{MatchID: "m1", RoomCode: "ABCD", Frames: []json.RawMessage{raw(t, roomSnap)}})
 	for _, c := range []*client{a, b} {
-		if sn, ok := c.recv().(*protocol.Snapshot); !ok || sn.Tick != 7 {
+		sn, ok := c.recv().(*protocol.Snapshot)
+		if !ok || sn.Tick != 7 {
 			t.Fatalf("expected snapshot tick 7, got %#v", sn)
+		}
+		if len(sn.PowerUps) != 2 || sn.PowerUps[0].ID != "power1" || sn.PowerUps[1].Kind != protocol.PowerUpInvisibility {
+			t.Fatalf("power_ups lost in fanout: %#v", sn.PowerUps)
+		}
+		if sn.Players[0].SpeedBoostMS != 2500 || sn.Players[1].InvisibleMS != 1000 {
+			t.Fatalf("player effects lost in fanout: %#v", sn.Players)
 		}
 	}
 

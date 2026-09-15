@@ -53,6 +53,12 @@ export function startGame(net, matchStart, hooks = {}) {
   hudAlive.title = 'Runners alive';
   const hudStatus = el('span', 'hud-status', '');
   hud.append(el('span', 'hud-label', 'Time'), hudTimer, el('span', 'hud-sep', '·'), el('span', 'hud-label', 'Alive'), hudAlive, hudStatus);
+  const hudPowers = el('span', 'hud-powers');
+  const speedEffect = el('span', 'power-badge speed');
+  const invisibleEffect = el('span', 'power-badge invisibility');
+  const powerHint = el('span', 'power-hint', 'Pickups: gold bolt = 1.5× speed / 5s · violet ring = invisible to catchers / 3s');
+  hudPowers.append(speedEffect, invisibleEffect, powerHint);
+  hud.append(hudPowers);
 
   let banner = document.getElementById('spectator-banner');
   if (!banner) {
@@ -80,6 +86,7 @@ export function startGame(net, matchStart, hooks = {}) {
     alive_count: (matchStart.players || []).length,
     players: (matchStart.players || []).map(p => ({ id: p.player_id, x: p.x, y: p.y, dir: 'none', alive: true })),
     catchers: (matchStart.catchers || []).map(c => ({ id: c.id, x: c.x, y: c.y, dir: 'none' })),
+    power_ups: matchStart.power_ups || [],
   };
   cur = initial; prev = initial; curAt = performance.now();
 
@@ -97,6 +104,14 @@ export function startGame(net, matchStart, hooks = {}) {
     hud.classList.toggle('spectating', spectating);
     hudTimer.classList.toggle('urgent', cur.time_left_ms <= 10000);
     banner.hidden = !spectating;
+    const me = (cur.players || []).find(p => p.id === myId && p.alive);
+    const speedMS = !spectating && me ? me.speed_boost_ms || 0 : 0;
+    const invisibleMS = !spectating && me ? me.invisible_ms || 0 : 0;
+    speedEffect.hidden = speedMS <= 0;
+    invisibleEffect.hidden = invisibleMS <= 0;
+    speedEffect.textContent = `Speed ×1.5 · ${(speedMS / 1000).toFixed(1)}s`;
+    invisibleEffect.textContent = `Invisible · ${(invisibleMS / 1000).toFixed(1)}s`;
+    powerHint.hidden = speedMS > 0 || invisibleMS > 0;
     if (spectating) {
       const you = matchStart.you || {};
       const caught = deaths.has(myId) || deadIds.has(myId);
@@ -215,6 +230,7 @@ export function startGame(net, matchStart, hooks = {}) {
       runners.push({
         x: lerp(q.x, p.x, alpha), y: lerp(q.y, p.y, alpha),
         color: st.color, name: st.name, alive: true, isYou: p.id === myId, deathProgress: null,
+        speedBoost: (p.speed_boost_ms || 0) > 0, invisible: (p.invisible_ms || 0) > 0,
       });
     }
     const catchers = [];
@@ -222,7 +238,7 @@ export function startGame(net, matchStart, hooks = {}) {
       const q = prevCatch.get(c.id) || c;
       catchers.push({ x: lerp(q.x, c.x, alpha), y: lerp(q.y, c.y, alpha), dir: c.dir });
     }
-    drawFrame(ctx, canvas, { maze: matchStart.maze, runners, catchers });
+    drawFrame(ctx, canvas, { maze: matchStart.maze, runners, catchers, powerUps: cur.power_ups || [], now });
     raf = requestAnimationFrame(frame);
   }
   raf = requestAnimationFrame(frame);

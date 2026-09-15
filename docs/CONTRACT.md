@@ -14,11 +14,11 @@ which services forward to their peers so one keypress is traceable end to end.
 
 | Service | Port | Responsibility |
 | --- | --- | --- |
-| gateway | 8080 | static `web/`, player websockets at `/ws`, fanout, routes intents |
-| matchmaking | 8081 | rooms, config, ready state, start criteria, roles/colors |
-| simulation | 8082 | authoritative 20 Hz tick loop, collision, elimination, win |
-| maze | 8083 | seeded maze generation and validation |
-| stats | 8084 | match results and leaderboard |
+| gateway | 8090 | static `web/`, player websockets at `/ws`, fanout, routes intents |
+| matchmaking | 8091 | rooms, config, ready state, start criteria, roles/colors |
+| simulation | 8092 | authoritative 20 Hz tick loop, collision, elimination, win |
+| maze | 8093 | seeded maze generation and validation |
+| stats | 8094 | match results and leaderboard |
 
 Every service answers `GET /healthz` -> `{service, version, ok}`.
 
@@ -44,9 +44,9 @@ every frame except `ping`, which is answered with `pong` at any time.
 | --- | --- |
 | `welcome` | `player_id` |
 | `room_state` | `code`, `config`, `players: [{player_id, name, color, ready, is_creator, is_bot?}]`, `countdown_ms` (0 when idle) |
-| `match_start` | `match_id`, `maze: {w, h, walls}`, `you: {player_id, role, color}`, `players: [{player_id, name, role, color, x, y, is_bot?}]`, `catchers: [{id, x, y}]`, `round_ms` |
-| `snapshot` | `tick`, `ts` (server millis), `players: [{id, x, y, dir, alive}]`, `catchers: [{id, x, y, dir}]`, `time_left_ms`, `alive_count` |
-| `event` | `kind` ∈ `caught` (`player_id`, `catcher_id`, `tick`), `countdown` (`ms`), `bot_joined` (`player_id`, `name`) |
+| `match_start` | `match_id`, `maze: {w, h, walls}`, `you: {player_id, role, color}`, `players: [{player_id, name, role, color, x, y, is_bot?}]`, `catchers: [{id, x, y}]`, `power_ups: [{id, kind, x, y}]`, `round_ms` |
+| `snapshot` | `tick`, `ts` (server millis), `players: [{id, x, y, dir, alive, speed_boost_ms?, invisible_ms?}]`, `catchers: [{id, x, y, dir}]`, `power_ups: [{id, kind, x, y}]`, `time_left_ms`, `alive_count` |
+| `event` | `kind` ∈ `caught` (`player_id`, `catcher_id`, `tick`), `countdown` (`ms`), `bot_joined` (`player_id`, `name`), `power_up_collected` (`player_id`, `tick`, `ms` effect duration, `power_up_id`, `power_up_kind`) |
 | `match_end` | `match_id`, `winner_ids: []`, `standings: [{player_id, name, survived_ms, place}]` |
 | `error` | `code`, `message` |
 | `pong` | `ts` (echo of ping) |
@@ -58,7 +58,7 @@ every frame except `ping`, which is answered with `pong` at any time.
 ```json
 {
   "maze_size": "small | medium | large",     // 15x15, 21x21, 31x31
-  "catchers": 1..4,
+  "catchers": positive integer,
   "catcher_speed": 0.6..1.4,
   "round_seconds": 30..300,
   "min_players": 2..8,
@@ -66,6 +66,8 @@ every frame except `ping`, which is answered with `pong` at any time.
   "seed": 12345                              // optional; omit for random
 }
 ```
+
+There is no fixed catcher-count cap. The chosen maze must have enough spawn space for the catchers and keep every runner at least 6 cells away; configurations that cannot be placed are rejected when the match starts.
 
 ### Maze encoding
 
@@ -85,15 +87,32 @@ top left cell. Mazes are square and odd sized.
 - Entities travel along cell centers; `gridmath.Grid.Step` is the reference
   movement function and must be used by the simulation.
 
+### Power-ups
+
+The simulation spawns up to four maze pickups (stable ids `power1`..`power4`,
+two of each kind) on open cell centers at least 2 cells (euclidean) from every
+living runner and catcher; collected pickups respawn after 8000 ms under the
+same placement rules. `power_ups` lists only active pickups (encoded `[]` when
+none). A runner on the same cell within 0.35 cells collects the pickup:
+
+- `speed`: 1.5× movement for 5000 ms (`speed_boost_ms` remaining on the
+  snapshot player; applies from the tick after collection).
+- `invisibility`: immune to catching and hidden from catcher brains for
+  3000 ms (`invisible_ms` remaining; protects on the collection tick itself).
+
+Re-collecting the same kind refreshes the duration; both kinds can be active
+at once. Collection is announced with `event{kind:power_up_collected}`.
+Clients only render pickups and effects — there is no pickup input frame.
+
 ## Inter-service HTTP
 
-### maze (8083)
+### maze (8093)
 
 `POST /generate` `MazeGenerateRequest {w, h, seed, runners, catchers}` ->
 `MazeGenerateResponse {maze, seed, runner_spawns: [{x,y}], catcher_spawns: [{x,y}]}`.
 Every cell reachable; each runner spawn ≥ 6 cells (manhattan) from every catcher spawn.
 
-### matchmaking (8081)
+### matchmaking (8091)
 
 Gateway forwards lobby intents; every mutation returns
 `MMRoomResponse {room: RoomState, recipients: [player_id]}` and the gateway fans
@@ -116,7 +135,7 @@ Matchmaking then runs the 5 s countdown (gateway learns of it through
 `POST /matches` on simulation, forwarding the resulting per-player
 `match_start` frames to the gateway via `/internal/push`.
 
-### simulation (8082)
+### simulation (8092)
 
 | route | body / response |
 | --- | --- |
@@ -129,7 +148,7 @@ Simulation calls the maze service for the layout and pushes `snapshot`,
 `GatewayPush {match_id, room_code, frames: [encoded frames]}`. At match end it
 posts `StatsResultRequest` to stats.
 
-### gateway (8080)
+### gateway (8090)
 
 | route | body |
 | --- | --- |
@@ -138,7 +157,7 @@ posts `StatsResultRequest` to stats.
 | `GET /leaderboard` | proxies stats `GET /leaderboard` and renders a simple HTML table |
 | `/` | static files from `web/` |
 
-### stats (8084)
+### stats (8094)
 
 | route | body |
 | --- | --- |

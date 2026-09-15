@@ -1,5 +1,5 @@
 // Package matchmaking owns rooms: join codes, config validation, ready state, start
-// criteria, countdown, role and color assignment. Port 8081.
+// criteria, countdown, role and color assignment. Port 8091.
 package matchmaking
 
 import (

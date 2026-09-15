@@ -1,4 +1,4 @@
-// Command gateway runs the gateway service on port 8080.
+// Command gateway runs the gateway service on port 8090.
 package main
 
 import (

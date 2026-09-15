@@ -148,7 +148,8 @@ func TestValidate(t *testing.T) {
 		{W: 15, H: 21, Runners: 1, Catchers: 1},
 		{W: 3, H: 3, Runners: 1, Catchers: 1},
 		{W: 15, H: 15, Runners: -1, Catchers: 1},
-		{W: 15, H: 15, Runners: 1, Catchers: MaxCatchers + 1},
+		{W: 15, H: 15, Runners: 1, Catchers: 15*15 + 1},
+		{W: 15, H: 15, Runners: 1, Catchers: int(^uint(0) >> 1)},
 	}
 	for _, r := range bad {
 		if _, err := Generate(r); err == nil {
@@ -221,5 +222,36 @@ func TestHTTPGenerate(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for bad json, got %d", resp.StatusCode)
+	}
+}
+
+func TestGenerateCatchersAboveFormerCaps(t *testing.T) {
+	for _, n := range sizes {
+		for _, count := range []int{5, 17, 32} {
+			for seed := int64(1); seed <= 3; seed++ {
+				res := gen(t, n, seed, 8, count)
+				if len(res.CatcherSpawns) != count || len(res.RunnerSpawns) != 8 {
+					t.Fatalf("%dx%d: unexpected spawn counts %d/%d", n, n, len(res.CatcherSpawns), len(res.RunnerSpawns))
+				}
+				for _, r := range res.RunnerSpawns {
+					for _, c := range res.CatcherSpawns {
+						if gridmath.Manhattan(cellOf(r), cellOf(c)) < MinSpawnSeparation {
+							t.Fatalf("%dx%d, %d catchers: spawn separation violated", n, n, count)
+						}
+					}
+				}
+				replay := gen(t, n, seed, 8, count)
+				if !reflect.DeepEqual(res, replay) {
+					t.Fatal("catcher placement must remain deterministic")
+				}
+			}
+		}
+	}
+}
+
+func TestGenerateRejectsCatchersLeavingNoRunnerSpace(t *testing.T) {
+	_, err := Generate(protocol.MazeGenerateRequest{W: 15, H: 15, Seed: 42, Runners: 1, Catchers: 15 * 15})
+	if err == nil {
+		t.Fatal("expected insufficient runner spawn space")
 	}
 }

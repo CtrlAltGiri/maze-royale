@@ -36,10 +36,14 @@ func TestRoundTripAllMessages(t *testing.T) {
 		&MatchStart{T: TypeMatchStart, MatchID: "m1", Maze: Maze{W: 3, H: 3, Walls: Walls{15, 15, 15, 15, 0, 15, 15, 15, 15}},
 			You:      You{PlayerID: "p1", Role: RoleRunner, Color: "#fff"},
 			Players:  []MatchPlayer{{PlayerID: "p1", Name: "a", Role: RoleRunner, Color: "#fff", X: 0.5, Y: 0.5}},
-			Catchers: []MatchCatcher{{ID: "c1", X: 2.5, Y: 2.5}}, RoundMS: 120000},
-		&Snapshot{T: TypeSnapshot, Tick: 10, TS: 99, Players: []SnapshotPlayer{{ID: "p1", X: 1.5, Y: 0.5, Dir: DirRight, Alive: true}},
-			Catchers: []SnapshotCatcher{{ID: "c1", X: 2.5, Y: 2.5, Dir: DirNone}}, TimeLeftMS: 1000, AliveCount: 1},
+			Catchers: []MatchCatcher{{ID: "c1", X: 2.5, Y: 2.5}},
+			PowerUps: []PowerUp{{ID: "power1", Kind: PowerUpSpeed, X: 1.5, Y: 1.5}, {ID: "power2", Kind: PowerUpInvisibility, X: 0.5, Y: 2.5}},
+			RoundMS:  120000},
+		&Snapshot{T: TypeSnapshot, Tick: 10, TS: 99, Players: []SnapshotPlayer{{ID: "p1", X: 1.5, Y: 0.5, Dir: DirRight, Alive: true, SpeedBoostMS: 2500, InvisibleMS: 1000}},
+			Catchers: []SnapshotCatcher{{ID: "c1", X: 2.5, Y: 2.5, Dir: DirNone}},
+			PowerUps: []PowerUp{{ID: "power2", Kind: PowerUpInvisibility, X: 0.5, Y: 2.5}}, TimeLeftMS: 1000, AliveCount: 1},
 		&Event{T: TypeEvent, Kind: EventCaught, PlayerID: "p1", CatcherID: "c1", Tick: 10},
+		&Event{T: TypeEvent, Kind: EventPowerUpCollected, PlayerID: "p1", Tick: 10, MS: 5000, PowerUpID: "power1", PowerUpKind: PowerUpSpeed},
 		&Event{T: TypeEvent, Kind: EventCountdown, MS: 3000},
 		&MatchEnd{T: TypeMatchEnd, MatchID: "m1", WinnerIDs: []string{"p1"}, Standings: []Standing{{PlayerID: "p1", Name: "a", SurvivedMS: 5000, Place: 1}}},
 		&Error{T: TypeError, Code: ErrBadRequest, Message: "nope"},
@@ -63,15 +67,18 @@ func TestDecodeUnknownType(t *testing.T) {
 }
 
 func TestWireFieldNames(t *testing.T) {
-	raw, _ := Encode(Snapshot{T: TypeSnapshot, Players: []SnapshotPlayer{}, Catchers: []SnapshotCatcher{}})
+	raw, _ := Encode(Snapshot{T: TypeSnapshot, Players: []SnapshotPlayer{}, Catchers: []SnapshotCatcher{}, PowerUps: []PowerUp{}})
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"t", "tick", "ts", "players", "catchers", "time_left_ms", "alive_count"} {
+	for _, k := range []string{"t", "tick", "ts", "players", "catchers", "power_ups", "time_left_ms", "alive_count"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("snapshot missing wire field %q in %s", k, raw)
 		}
+	}
+	if _, ok := m["power_ups"].([]any); !ok {
+		t.Errorf("power_ups must encode as [] not null in %s", raw)
 	}
 	raw, _ = Encode(RoomState{T: TypeRoomState, Players: []RoomPlayer{{}}})
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -107,7 +114,7 @@ func TestRoomConfigValidate(t *testing.T) {
 	bad := []RoomConfig{
 		func() RoomConfig { c := good; c.MazeSize = "huge"; return c }(),
 		func() RoomConfig { c := good; c.Catchers = 0; return c }(),
-		func() RoomConfig { c := good; c.Catchers = 5; return c }(),
+		func() RoomConfig { c := good; c.Catchers = -1; return c }(),
 		func() RoomConfig { c := good; c.CatcherSpeed = 0.5; return c }(),
 		func() RoomConfig { c := good; c.CatcherSpeed = 1.5; return c }(),
 		func() RoomConfig { c := good; c.RoundSeconds = 29; return c }(),
@@ -141,5 +148,15 @@ func TestMazeDimension(t *testing.T) {
 	}
 	if _, ok := MazeDimension("x"); ok {
 		t.Error("unknown size accepted")
+	}
+}
+
+func TestRoomConfigAllowsCatchersAboveFormerCaps(t *testing.T) {
+	for _, count := range []int{5, 17, 32, 1000} {
+		c := DefaultRoomConfig()
+		c.Catchers = count
+		if err := c.Validate(); err != nil {
+			t.Fatalf("%d catchers: %v", count, err)
+		}
 	}
 }

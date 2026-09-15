@@ -1,4 +1,4 @@
-// Command maze runs the maze service on port 8083.
+// Command maze runs the maze service on port 8093.
 package main
 
 import (

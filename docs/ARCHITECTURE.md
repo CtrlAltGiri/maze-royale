@@ -9,18 +9,18 @@ to each other, plus a static canvas client. One command starts everything:
                               |  websocket, JSON text frames
                               v
                     +---------------------+
-                    |  gateway  :8080     |  static files, /ws, fanout
+                    |  gateway  :8090     |  static files, /ws, fanout
                     +----+-----------+----+
        lobby intents     |           |  input intents          ^
                          v           v                         |  POST /internal/push
             +----------------+   +------------------+          |  (room_state, event,
-            | matchmaking    |-->| simulation :8082 |----------+   match_start, snapshot,
-            |   :8081        |   | 20 Hz tick loop  |              match_end)
+            | matchmaking    |-->| simulation :8092 |----------+   match_start, snapshot,
+            |   :8091        |   | 20 Hz tick loop  |              match_end)
             +----------------+   +---+----------+---+
                                      |          |
                      POST /generate  v          v  POST /results
                           +-------------+   +------------+
-                          | maze :8083  |   | stats :8084|-- ./data/stats.json
+                          | maze :8093  |   | stats :8094|-- ./data/stats.json
                           +-------------+   +------------+
 ```
 
@@ -36,7 +36,7 @@ and server helpers with `X-Request-Id` propagation).
 2. `internal/gateway` decodes the frame, looks up the connection's room and the
    room's `match_id`, mints an `X-Request-Id`, and posts
    `SimInputRequest {player_id, seq, dir}` to
-   `simulation:8082 POST /matches/{match_id}/input`. It returns immediately.
+   `simulation:8092 POST /matches/{match_id}/input`. It returns immediately.
 3. `internal/simulation` stores the intent as the runner's desired direction
    (latest `seq` wins). Nothing moves yet.
 4. On the next tick (every 50 ms) the match loop calls
@@ -46,7 +46,7 @@ and server helpers with `X-Request-Id` propagation).
    condition and round timer.
 5. The loop encodes one `snapshot` frame (plus any `event{kind:caught}` or
    `match_end` frames) and posts a `GatewayPush {match_id, room_code, frames}`
-   to `gateway:8080 POST /internal/push`.
+   to `gateway:8090 POST /internal/push`.
 6. The gateway writes every frame to every websocket connection in that room,
    players and spectators alike.
 7. Each tab's `web/game.js` buffers the snapshot and `web/render.js`

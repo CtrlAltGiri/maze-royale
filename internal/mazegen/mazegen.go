@@ -1,5 +1,5 @@
 // Package mazegen generates seeded, validated mazes (recursive backtracker) and
-// serves them over HTTP on port 8083.
+// serves them over HTTP on port 8093.
 package mazegen
 
 import (
@@ -22,9 +22,8 @@ const (
 	MinSide = 7
 	// MaxSide is the largest supported maze side.
 	MaxSide = 101
-	// MaxRunners and MaxCatchers bound spawn counts per request.
-	MaxRunners  = 64
-	MaxCatchers = 16
+	// MaxRunners bounds the runner count per request.
+	MaxRunners = 64
 	// LoopFraction is the share of cells that get one extra passage carved
 	// after the perfect maze is built, so catchers meet intersections and loops.
 	LoopFraction = 0.12
@@ -68,8 +67,8 @@ func Validate(req protocol.MazeGenerateRequest) error {
 	if req.Runners < 0 || req.Runners > MaxRunners {
 		return fmt.Errorf("runners must be between 0 and %d: got %d", MaxRunners, req.Runners)
 	}
-	if req.Catchers < 0 || req.Catchers > MaxCatchers {
-		return fmt.Errorf("catchers must be between 0 and %d: got %d", MaxCatchers, req.Catchers)
+	if req.Catchers < 0 || req.Catchers > req.W*req.H {
+		return fmt.Errorf("catchers must be between 0 and the maze capacity of %d cells: got %d", req.W*req.H, req.Catchers)
 	}
 	return nil
 }

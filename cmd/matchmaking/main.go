@@ -1,4 +1,4 @@
-// Command matchmaking runs the matchmaking service on port 8081.
+// Command matchmaking runs the matchmaking service on port 8091.
 package main
 
 import (

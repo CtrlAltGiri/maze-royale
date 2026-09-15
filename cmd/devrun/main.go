@@ -13,6 +13,8 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+
+	"github.com/COG-GTM/riot-games-enablement-game/internal/protocol"
 )
 
 // Start order matters only for log readability; services retry their peers.
@@ -68,7 +70,7 @@ func main() {
 			}
 		}(name, cmd)
 	}
-	fmt.Println("devrun: all services starting; open http://localhost:8080  (Ctrl+C to stop)")
+	fmt.Printf("devrun: all services starting; open %s  (Ctrl+C to stop)\n", protocol.GatewayURL)
 	wg.Wait()
 	if failed {
 		os.Exit(1)

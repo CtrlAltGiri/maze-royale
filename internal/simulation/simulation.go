@@ -1,5 +1,5 @@
 // Package simulation runs the authoritative 20Hz tick loop per match: movement,
-// collision, catchers, elimination, win condition. Port 8082.
+// collision, catchers, elimination, win condition. Port 8092.
 package simulation
 
 import (
@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"sync"
@@ -215,6 +216,8 @@ func (s *Service) CreateMatch(ctx context.Context, req protocol.SimCreateMatchRe
 			speed: speed, mover: s.cfg.NewMover(gen.Seed, i),
 		})
 	}
+	m.powerUpRNG = rand.New(rand.NewSource(gen.Seed))
+	m.initPowerUps()
 	m.start = protocol.MatchStart{T: protocol.TypeMatchStart, MatchID: m.id, Maze: gen.Maze, RoundMS: m.roundMS}
 	for _, r := range m.runners {
 		m.start.Players = append(m.start.Players, protocol.MatchPlayer{

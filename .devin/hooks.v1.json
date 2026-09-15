@@ -1,0 +1,14 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Maze Royale sample hook loaded. For a read-only repository introduction, use /game-tour.\"}}'",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}

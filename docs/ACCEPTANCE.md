@@ -1,6 +1,6 @@
 # Acceptance test — the only definition of done
 
-Run `make run`, then open four browser tabs at `http://localhost:8080`.
+Run `make run`, then open four browser tabs at `http://localhost:8090`.
 
 1. Tab 1 creates a room with 21x21, 2 catchers, speed 1.0, 120 seconds,
    minimum 3 players, bots off. It gets a join code.
@@ -14,7 +14,7 @@ Run `make run`, then open four browser tabs at `http://localhost:8080`.
    tab switches to spectator.
 6. When one runner remains, every tab shows the same winner and the same
    standings.
-7. The leaderboard at `http://localhost:8080/leaderboard` reflects the result.
+7. The leaderboard at `http://localhost:8090/leaderboard` reflects the result.
 8. Killing a tab mid match and reopening it rejoins as a spectator without
    desyncing anyone.
 9. `go vet ./...` and `go test ./...` pass. The whole thing runs with

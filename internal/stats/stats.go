@@ -1,5 +1,5 @@
 // Package stats persists match results to ./data/stats.json and serves the
-// leaderboard read model. Port 8084.
+// leaderboard read model. Port 8094.
 package stats
 
 import (
