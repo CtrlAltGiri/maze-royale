@@ -62,10 +62,12 @@ function drawTag(ctx, px, py, r, text) {
   } else {
     ctx.textBaseline = 'bottom';
   }
+  const half = ctx.measureText(text).width / 2 + 2;
+  const tx = Math.min(Math.max(px, half), ctx.canvas.width - half);
   ctx.strokeStyle = COLORS.tagShadow;
-  ctx.strokeText(text, px, ty);
+  ctx.strokeText(text, tx, ty);
   ctx.fillStyle = COLORS.tag;
-  ctx.fillText(text, px, ty);
+  ctx.fillText(text, tx, ty);
 }
 
 // runner: {x, y, color, name, alive, isYou, deathProgress (0..1 or null)}

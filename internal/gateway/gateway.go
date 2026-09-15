@@ -476,7 +476,25 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 			c.write(r.Context(), f)
 		}
 	}
+	if ended {
+		go s.endRoomMatch(push.RoomCode, push.MatchID)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]int{"delivered": len(conns)})
+}
+
+// endRoomMatch tells matchmaking the room's match is over and fans the
+// resulting lobby room_state so clients can ready up again.
+func (s *Server) endRoomMatch(code, matchID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var res protocol.MMRoomResponse
+	if err := s.mm.Post(ctx, "/rooms/"+code+"/end", protocol.MMMatchEndRequest{MatchID: matchID}, &res); err != nil {
+		log.Printf("[gateway] room %s: matchmaking end: %v", code, err)
+		return
+	}
+	res.Room.T = protocol.TypeRoomState
+	s.recordRoom(res.Room)
+	s.fanout(ctx, res.Room.Code, res.Recipients, res.Room)
 }
 
 // ---- GET /leaderboard ----

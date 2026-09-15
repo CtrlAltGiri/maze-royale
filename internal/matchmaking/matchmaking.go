@@ -161,6 +161,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /rooms/{code}/leave", s.handleLeave)
 	mux.HandleFunc("POST /rooms/{code}/ready", s.handleReady)
 	mux.HandleFunc("POST /rooms/{code}/start", s.handleStart)
+	mux.HandleFunc("POST /rooms/{code}/end", s.handleEnd)
 	return mux
 }
 
@@ -278,7 +279,44 @@ func (s *Service) handleStart(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
+func (s *Service) handleEnd(w http.ResponseWriter, r *http.Request) {
+	var req protocol.MMMatchEndRequest
+	if err := httpx.ReadJSON(r, &req); err != nil {
+		writeErr(w, errBad(err.Error()))
+		return
+	}
+	resp, err := s.EndMatch(r.PathValue("code"), req.MatchID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
 // ---- room operations ----
+
+// EndMatch returns a room to the lobby once its match has ended: every human
+// is un-readied so the room can be started again. A stale or unknown
+// match_id is ignored (the room is returned unchanged).
+func (s *Service) EndMatch(code, matchID string) (protocol.MMRoomResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rm, err := s.roomLocked(code)
+	if err != nil {
+		return protocol.MMRoomResponse{}, err
+	}
+	if rm.phase == phaseInMatch && (matchID == "" || rm.matchID == "" || rm.matchID == matchID) {
+		rm.phase = phaseLobby
+		rm.matchID = ""
+		rm.countdownEnd = time.Time{}
+		for _, p := range rm.players {
+			if !p.IsBot {
+				p.Ready = false
+			}
+		}
+	}
+	return rm.response(s.now()), nil
+}
 
 // CreateRoom validates the config, mints a code and seats the creator.
 func (s *Service) CreateRoom(req protocol.MMCreateRoomRequest) (protocol.MMRoomResponse, error) {

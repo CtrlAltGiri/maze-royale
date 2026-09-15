@@ -238,6 +238,32 @@ loop:
 	}
 	log.Printf("winners: %v", end.WinnerIDs)
 
+	// The room must return to the lobby (countdown 0, nobody ready) and be
+	// startable again after the match.
+	for _, c := range []*client{a, b} {
+		c.waitFor("lobby room_state after match_end", 5*time.Second, func(m any) bool {
+			r, ok := m.(*protocol.RoomState)
+			if !ok || r.CountdownMS != 0 {
+				return false
+			}
+			for _, p := range r.Players {
+				if p.Ready {
+					return false
+				}
+			}
+			return true
+		})
+	}
+	a.send(ctx, protocol.SetReady{T: protocol.TypeSetReady, Ready: true})
+	b.send(ctx, protocol.SetReady{T: protocol.TypeSetReady, Ready: true})
+	b.waitFor("second countdown", 10*time.Second, func(m any) bool {
+		r, ok := m.(*protocol.RoomState)
+		return ok && r.CountdownMS > 0
+	})
+	log.Printf("room %s re-armed for a second round", code)
+	a.send(ctx, protocol.LeaveRoom{T: protocol.TypeLeaveRoom})
+	b.send(ctx, protocol.LeaveRoom{T: protocol.TypeLeaveRoom})
+
 	// Leaderboard: stats is written asynchronously by simulation; poll briefly.
 	var body string
 	for i := 0; i < 20; i++ {

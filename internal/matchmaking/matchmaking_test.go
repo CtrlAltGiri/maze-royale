@@ -328,6 +328,24 @@ func TestReadyAutoStartsAndRunsCountdown(t *testing.T) {
 	e.mustFail("POST", "/rooms/"+code+"/join", protocol.MMJoinRoomRequest{PlayerID: "late"}, http.StatusConflict, protocol.ErrInMatch)
 	e.mustFail("POST", "/rooms/"+code+"/ready", protocol.MMReadyRequest{PlayerID: "p1"}, http.StatusConflict, protocol.ErrInMatch)
 	e.mustFail("POST", "/rooms/"+code+"/start", protocol.MMPlayerRequest{PlayerID: "p1"}, http.StatusConflict, protocol.ErrInMatch)
+
+	// A stale match id is ignored; the real one returns the room to the lobby.
+	e.mustOK("POST", "/rooms/"+code+"/end", protocol.MMMatchEndRequest{MatchID: "other"})
+	e.mustFail("POST", "/rooms/"+code+"/ready", protocol.MMReadyRequest{PlayerID: "p1"}, http.StatusConflict, protocol.ErrInMatch)
+	r = e.mustOK("POST", "/rooms/"+code+"/end", protocol.MMMatchEndRequest{MatchID: "m-" + code})
+	if r.Room.CountdownMS != 0 || len(r.Recipients) != 2 {
+		t.Fatalf("end: %+v", r)
+	}
+	for _, p := range r.Room.Players {
+		if p.Ready {
+			t.Fatalf("player %s still ready after match end", p.PlayerID)
+		}
+	}
+	r = e.mustOK("POST", "/rooms/"+code+"/ready", protocol.MMReadyRequest{PlayerID: "p1", Ready: true})
+	if r.Room.CountdownMS != 0 {
+		t.Fatalf("one ready player restarted the countdown")
+	}
+	e.svc.Wait()
 }
 
 func TestCreatorStart(t *testing.T) {
