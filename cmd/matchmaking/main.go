@@ -14,14 +14,19 @@ import (
 )
 
 func main() {
+	defaults := matchmaking.DefaultOptions()
 	port := flag.Int("port", protocol.PortMatchmaking, "listen port")
+	gatewayURL := flag.String("gateway-url", defaults.GatewayURL, "gateway base URL (env "+matchmaking.EnvGatewayURL+")")
+	simulationURL := flag.String("simulation-url", defaults.SimulationURL, "simulation base URL (env "+matchmaking.EnvSimulationURL+")")
 	flag.Parse()
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := httpx.ListenAndServe(ctx, "matchmaking", *port, matchmaking.NewHandler()); err != nil {
+	svc := matchmaking.NewService(matchmaking.Options{GatewayURL: *gatewayURL, SimulationURL: *simulationURL})
+	if err := httpx.ListenAndServe(ctx, "matchmaking", *port, svc.Handler()); err != nil {
 		log.Fatalf("[matchmaking] %v", err)
 	}
+	svc.Wait()
 }
