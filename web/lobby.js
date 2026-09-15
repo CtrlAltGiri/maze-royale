@@ -47,12 +47,20 @@ net.on("close", () => {
 net.on("welcome", () => render());
 
 net.on("room_state", (msg) => {
+  const me = msg.players.find((p) => p.player_id === net.playerId);
+  if (!me) {
+    // Roster without us: the ack for our own leave. Stay on the home view.
+    if (state.room && state.room.code === msg.code) state.room = null;
+    if (!state.room) state.view = "home";
+    net.roomCode = null;
+    render();
+    return;
+  }
   state.room = msg;
   state.view = "room";
   state.countdownMs = msg.countdown_ms || 0;
   state.countdownAt = Date.now();
-  const me = msg.players.find((p) => p.player_id === net.playerId);
-  if (me) state.ready = me.ready;
+  state.ready = me.ready;
   render();
 });
 
