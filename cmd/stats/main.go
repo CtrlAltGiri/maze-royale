@@ -15,13 +15,18 @@ import (
 
 func main() {
 	port := flag.Int("port", protocol.PortStats, "listen port")
+	dataDir := flag.String("data", stats.DefaultDataDir, "directory holding stats.json")
 	flag.Parse()
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := httpx.ListenAndServe(ctx, "stats", *port, stats.NewHandler()); err != nil {
+	h, err := stats.NewHandlerWithDir(*dataDir)
+	if err != nil {
+		log.Fatalf("[stats] %v", err)
+	}
+	if err := httpx.ListenAndServe(ctx, "stats", *port, h); err != nil {
 		log.Fatalf("[stats] %v", err)
 	}
 }

@@ -1,2 +1,216 @@
 /* owned by client-render */
-body { margin: 0; background: #111; color: #eee; font-family: system-ui, sans-serif; }
+:root {
+  --bg: #111;
+  --panel: #1c1f26;
+  --panel-border: #2e333d;
+  --text: #eee;
+  --muted: #9aa3b2;
+  --accent: #4fc3f7;
+  --danger: #e53935;
+  --win: #81c784;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+}
+
+[hidden] { display: none !important; }
+
+h1, h2, h3 { margin: 0 0 0.5em; font-weight: 700; letter-spacing: 0.02em; }
+h1 { font-size: 1.8rem; }
+h2 { font-size: 1.3rem; }
+
+a { color: var(--accent); }
+
+/* ---- lobby ---- */
+#lobby {
+  width: 100%;
+  max-width: 640px;
+  margin: 2rem auto;
+  padding: 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+}
+
+#lobby label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin: 0.4rem 0;
+  color: var(--muted);
+}
+
+#lobby input, #lobby select, #lobby textarea {
+  background: #0d0f14;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  min-width: 10rem;
+}
+
+#lobby input:focus, #lobby select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#lobby ul, #lobby ol { padding-left: 1.2rem; }
+#lobby li { margin: 0.25rem 0; }
+
+#lobby table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
+#lobby th, #lobby td { padding: 0.4rem 0.5rem; text-align: left; border-bottom: 1px solid var(--panel-border); }
+#lobby th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; }
+
+button, .button {
+  background: #2a2f3a;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 0.55rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.05s;
+}
+button:hover { background: #343a47; }
+button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary { background: var(--accent); color: #06202b; border-color: transparent; }
+button.primary:hover { background: #6fd0fa; }
+button.danger { background: var(--danger); border-color: transparent; }
+
+.error, .lobby-error { color: #ff8a80; margin: 0.5rem 0; }
+.muted { color: var(--muted); }
+.code, .room-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.4rem; letter-spacing: 0.15em; }
+.countdown { font-size: 2rem; font-weight: 700; text-align: center; color: var(--accent); }
+
+.swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 50%;
+  margin-right: 0.5em;
+  vertical-align: -0.1em;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+/* ---- game canvas ---- */
+#game {
+  display: block;
+  margin: 5.5rem auto 1rem;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 6.75rem);
+  width: auto;
+  height: auto;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  image-rendering: auto;
+}
+
+/* ---- HUD ---- */
+#hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  padding: 0 1rem;
+  background: rgba(17, 17, 17, 0.92);
+  border-bottom: 1px solid var(--panel-border);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.15rem;
+  z-index: 5;
+  pointer-events: none;
+}
+#hud .hud-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; margin-right: -1.4rem; }
+#hud .hud-sep { color: var(--panel-border); }
+#hud .hud-timer { color: var(--accent); min-width: 4ch; font-size: 1.35rem; }
+#hud .hud-timer.urgent { color: #ff8a65; animation: hud-pulse 1s ease-in-out infinite; }
+#hud .hud-alive { color: var(--text); font-size: 1.35rem; }
+#hud .hud-status { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.8rem; margin-left: 1rem; }
+#hud.spectating .hud-status { color: #ffb74d; }
+@keyframes hud-pulse { 50% { opacity: 0.55; } }
+
+/* ---- spectator banner ---- */
+#spectator-banner {
+  position: fixed;
+  top: 3.1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.45rem 1.25rem;
+  background: rgba(255, 183, 77, 0.16);
+  border: 1px solid #ffb74d;
+  color: #ffcc80;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+  z-index: 6;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- overlay (standings) ---- */
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(3px);
+  z-index: 10;
+}
+#overlay:empty { display: none; }
+
+#overlay .panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  padding: 1.75rem 2rem;
+  min-width: 22rem;
+  max-width: min(36rem, 92vw);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+
+#overlay table.standings {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0 1.5rem;
+  text-align: left;
+}
+#overlay table.standings th, #overlay table.standings td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--panel-border);
+}
+#overlay table.standings th { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; }
+#overlay table.standings td:first-child { font-weight: 700; color: var(--muted); width: 2.5rem; }
+#overlay table.standings td:last-child { font-variant-numeric: tabular-nums; }
+#overlay .panel h1 { font-size: 2rem; }
+#overlay .panel p.muted { margin: -0.25rem 0 0.5rem; }
+#overlay .actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+#overlay .actions button { min-width: 9rem; padding: 0.7rem 1.4rem; font-size: 1.05rem; }
+#overlay tr.winner td { color: var(--win); }
+#overlay tr.you td { background: rgba(79, 195, 247, 0.08); }
+#overlay tr.you td:nth-child(2)::after { content: " (you)"; color: var(--muted); font-weight: 400; }

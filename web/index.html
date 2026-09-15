@@ -2,8 +2,58 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Maze Royale</title>
   <link rel="stylesheet" href="/style.css" />
+  <style>
+    /* Lobby styles are owned by client-net (lobby.js renders into #lobby). */
+    #lobby { max-width: 860px; margin: 0 auto; padding: 16px; }
+    #lobby h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    #lobby h2 { margin: 0 0 8px; font-size: 1.1rem; }
+    #lobby button { background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 6px 14px; cursor: pointer; font: inherit; }
+    #lobby button:hover { background: #444; }
+    #lobby button:disabled { opacity: .5; cursor: default; }
+    #lobby button.primary { background: #2e7d32; border-color: #2e7d32; }
+    #lobby button.primary:hover { background: #388e3c; }
+    #lobby button.small { padding: 2px 8px; font-size: .8rem; }
+    #lobby input, #lobby select { background: #222; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 5px 8px; font: inherit; }
+    #lobby input[type=checkbox] { width: 18px; height: 18px; }
+    .lobby-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .lobby-status { font-size: .85rem; color: #aaa; }
+    .status-ok { color: #81c784; }
+    .status-bad { color: #ef9a9a; }
+    .lobby-error { background: #5a1a1a; border: 1px solid #c62828; color: #ffcdd2; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; }
+    .lobby-name-section { margin-bottom: 16px; }
+    .lobby-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 640px) { .lobby-columns { grid-template-columns: 1fr; } }
+    .lobby-create, .lobby-join { background: #1b1b1b; border: 1px solid #333; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .lobby-field { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .lobby-field > span { color: #bbb; }
+    .lobby-field > input, .lobby-field > select { width: 140px; }
+    .lobby-code { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 4px 0 12px; padding: 14px; background: #15171c; border: 1px dashed #444; border-radius: 8px; }
+    .lobby-code .code-label { color: #aaa; font-size: .85rem; text-transform: uppercase; letter-spacing: .12em; }
+    .lobby-code .code-row { display: flex; align-items: center; gap: 16px; }
+    .lobby-code .code { font-size: 3.2rem; line-height: 1.1; letter-spacing: .3em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #fff176; cursor: pointer; user-select: all; }
+    .lobby-code .code:focus-visible { outline: 2px solid #4fc3f7; outline-offset: 4px; border-radius: 4px; }
+    #lobby button.copied { background: #2e7d32; border-color: #2e7d32; color: #fff; }
+    #lobby input.code-input { text-transform: uppercase; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .2em; }
+    .lobby-countdown { font-size: 1.8rem; margin: 8px 0; color: #ffb74d; text-align: center; font-weight: 700; }
+    .lobby-hint { color: #bbb; font-size: .95rem; margin: 8px 0; text-align: center; min-height: 1.4em; }
+    .roster-title { color: #bbb; font-size: .9rem !important; text-transform: uppercase; letter-spacing: .08em; }
+    .lobby-roster .name .you { color: #888; font-size: .85em; }
+    .lobby-roster .badge.bot { background: #37474f; }
+    .lobby-config { color: #aaa; font-size: .9rem; margin-bottom: 12px; }
+    .lobby-roster { list-style: none; padding: 0; margin: 0 0 16px; display: flex; flex-direction: column; gap: 6px; }
+    .lobby-roster li { display: flex; align-items: center; gap: 10px; background: #1b1b1b; border: 1px solid #333; border-radius: 4px; padding: 6px 10px; }
+    .lobby-roster li.me { border-color: #777; }
+    .lobby-roster .swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid #000; flex: none; }
+    .lobby-roster .name { flex: 1; }
+    .lobby-roster .badge { font-size: .7rem; text-transform: uppercase; padding: 1px 6px; border-radius: 3px; background: #444; }
+    .lobby-roster .badge.creator { background: #6a1b9a; }
+    .lobby-roster .ready.yes { color: #81c784; }
+    .lobby-roster .ready.no { color: #888; }
+    .lobby-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  </style>
 </head>
 <body>
   <!-- Lobby UI is owned by client-net (lobby.js). Game canvas is owned by client-render (game.js). -->

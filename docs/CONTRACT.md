@@ -35,7 +35,8 @@ Every service answers `GET /healthz` -> `{service, version, ok}`.
 | `input` | `seq` (int, monotonically increasing per client), `dir` ∈ `up`,`down`,`left`,`right`,`none` |
 | `ping` | `ts` (client millis) |
 
-Clients send intent only. They never assert position.
+Clients send intent only. They never assert position. `hello` must precede
+every frame except `ping`, which is answered with `pong` at any time.
 
 ## Gateway -> client
 
@@ -106,6 +107,7 @@ Gateway forwards lobby intents; every mutation returns
 | `POST /rooms/{code}/leave` | `{player_id}` |
 | `POST /rooms/{code}/ready` | `{player_id, ready}` |
 | `POST /rooms/{code}/start` | `{player_id}` (creator only) |
+| `POST /rooms/{code}/end` | `{match_id}` (from the gateway when it relays `match_end`); room returns to the lobby, humans un-readied, and the gateway fans `room` to `recipients` |
 
 Start criteria: `min_players` reached and all ready, or creator calls start.
 Matchmaking then runs the 5 s countdown (gateway learns of it through

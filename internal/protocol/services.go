@@ -70,6 +70,13 @@ type MMReadyRequest struct {
 	Ready    bool   `json:"ready"`
 }
 
+// MMMatchEndRequest: POST /rooms/{code}/end. Sent by the gateway when a
+// match_end frame passes through /internal/push so the room returns to the
+// lobby and can be started again.
+type MMMatchEndRequest struct {
+	MatchID string `json:"match_id"`
+}
+
 // MMRoomResponse is returned by every room mutation and GET /rooms/{code}.
 // Recipients lists the player ids the gateway should fan the RoomState to.
 type MMRoomResponse struct {
