@@ -4,6 +4,7 @@ import { startGame } from "./game.js";
 
 const NAME_KEY = "mazeroyale.name";
 const CONFIG_KEY = "mazeroyale.config";
+const ROOM_KEY = "mazeroyale.room";
 
 const DEFAULT_CONFIG = {
   maze_size: "medium",
@@ -27,6 +28,7 @@ const state = {
   ready: false,
   copied: false,
   copiedTimer: null,
+  autoJoining: false,
 };
 
 const root = document.getElementById("lobby");
@@ -37,7 +39,14 @@ const net = createNet();
 
 net.on("open", ({ reconnecting }) => {
   state.connected = true;
-  if (!reconnecting && state.name) net.hello(state.name);
+  if (!reconnecting && state.name) {
+    net.hello(state.name);
+    const saved = localStorage.getItem(ROOM_KEY);
+    if (saved && !net.roomCode) {
+      state.autoJoining = true;
+      net.joinRoom(saved);
+    }
+  }
   render();
 });
 
@@ -55,10 +64,13 @@ net.on("room_state", (msg) => {
     if (state.room && state.room.code === msg.code) state.room = null;
     if (!state.room) state.view = "home";
     net.roomCode = null;
+    localStorage.removeItem(ROOM_KEY);
     render();
     return;
   }
   state.room = msg;
+  state.autoJoining = false;
+  localStorage.setItem(ROOM_KEY, msg.code);
   state.view = "room";
   state.countdownMs = msg.countdown_ms || 0;
   state.countdownAt = Date.now();
@@ -78,6 +90,14 @@ net.on("event", (msg) => {
 });
 
 net.on("error", (msg) => {
+  if (state.autoJoining) {
+    // Saved room is gone (or refused us); forget it so reloads land on home.
+    state.autoJoining = false;
+    localStorage.removeItem(ROOM_KEY);
+    net.roomCode = null;
+    render();
+    return;
+  }
   showError(`${msg.code || "error"}: ${msg.message || "unknown error"}`);
 });
 
@@ -100,6 +120,7 @@ net.on("match_start", (msg) => {
       },
       onBackToLobby: () => {
         if (state.room) net.leaveRoom();
+        localStorage.removeItem(ROOM_KEY);
         state.room = null;
         state.ready = false;
         state.countdownMs = 0;
