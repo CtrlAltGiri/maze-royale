@@ -82,6 +82,10 @@ func NewHandlerWithConfig(cfg Config) http.Handler {
 
 const writeTimeout = 5 * time.Second
 
+// disconnectGrace is how long a room seat is held for a player whose socket
+// dropped before the gateway removes them from the room.
+const disconnectGrace = 10 * time.Second
+
 // Server is the gateway state: live connections, room membership and the
 // room -> match mapping learned from /internal/push.
 type Server struct {
@@ -447,11 +451,46 @@ func (s *Server) matchAndRole(code, playerID string) (matchID string, spectator 
 
 func (s *Server) dropConn(c *conn) {
 	s.mu.Lock()
-	if c.playerID != "" && s.conns[c.playerID] == c {
+	dropped := c.playerID != "" && s.conns[c.playerID] == c
+	if dropped {
 		delete(s.conns, c.playerID)
 	}
+	_, inRoom := s.where[c.playerID]
 	s.mu.Unlock()
 	_ = c.ws.CloseNow()
+	if dropped && inRoom {
+		time.AfterFunc(disconnectGrace, func() { s.evictIfGone(c.playerID) })
+	}
+}
+
+// evictIfGone removes playerID from its room unless a live connection for the
+// same player id has appeared in the meantime.
+func (s *Server) evictIfGone(playerID string) {
+	s.mu.Lock()
+	_, live := s.conns[playerID]
+	code, inRoom := s.where[playerID]
+	spectator := inRoom && s.rooms[code] != nil && s.rooms[code].spectators[playerID]
+	s.mu.Unlock()
+	if live || !inRoom {
+		return
+	}
+	if spectator {
+		// Spectators are never on the matchmaking roster.
+		s.forget(playerID)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	var res protocol.MMRoomResponse
+	err := s.mm.Post(ctx, "/rooms/"+code+"/leave", protocol.MMPlayerRequest{PlayerID: playerID}, &res)
+	s.forget(playerID)
+	if err != nil {
+		log.Printf("[gateway] room %s: evict %s: %v", code, playerID, err)
+		return
+	}
+	res.Room.T = protocol.TypeRoomState
+	s.recordRoom(res.Room)
+	s.fanout(ctx, res.Room.Code, res.Recipients, res.Room)
 }
 
 // targets returns the live connections for the given player ids, or for every
