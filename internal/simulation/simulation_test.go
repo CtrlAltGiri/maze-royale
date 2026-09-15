@@ -45,7 +45,7 @@ type fixedMover struct {
 	calls int
 }
 
-func (f *fixedMover) Next(g gridmath.Grid, c gridmath.Cell, _ protocol.Direction, _ []gridmath.Vec) protocol.Direction {
+func (f *fixedMover) Next(g gridmath.Grid, c gridmath.Cell, _ protocol.Direction, _, _ []gridmath.Vec) protocol.Direction {
 	f.calls++
 	if g.CanMove(c, f.dir) {
 		return f.dir
@@ -391,19 +391,86 @@ func TestRandomWalkNeverReversesExceptDeadEnd(t *testing.T) {
 	// 3x1 corridor.
 	g := gridmath.Grid{M: openMaze(3, 1)}
 	rw := NewRandomWalk(1)
-	if d := rw.Next(g, gridmath.Cell{X: 1, Y: 0}, protocol.DirRight, nil); d != protocol.DirRight {
+	if d := rw.Next(g, gridmath.Cell{X: 1, Y: 0}, protocol.DirRight, nil, nil); d != protocol.DirRight {
 		t.Fatalf("corridor: want right, got %s", d)
 	}
-	if d := rw.Next(g, gridmath.Cell{X: 2, Y: 0}, protocol.DirRight, nil); d != protocol.DirLeft {
+	if d := rw.Next(g, gridmath.Cell{X: 2, Y: 0}, protocol.DirRight, nil, nil); d != protocol.DirLeft {
 		t.Fatalf("dead end: want left, got %s", d)
 	}
 	// Open grid intersection: never the reverse, always passable.
 	open := gridmath.Grid{M: openMaze(3, 3)}
 	for i := 0; i < 200; i++ {
-		d := rw.Next(open, gridmath.Cell{X: 1, Y: 1}, protocol.DirUp, nil)
+		d := rw.Next(open, gridmath.Cell{X: 1, Y: 1}, protocol.DirUp, nil, nil)
 		if d == protocol.DirDown || !open.CanMove(gridmath.Cell{X: 1, Y: 1}, d) {
 			t.Fatalf("intersection picked %s", d)
 		}
+	}
+}
+
+func TestRandomWalkSpreadsAwayFromOtherCatchers(t *testing.T) {
+	// 9x9 open grid, deciding at the centre while travelling up: left or right
+	// (never down). Another catcher sits far to the right, so left must dominate.
+	g := gridmath.Grid{M: openMaze(9, 9)}
+	rw := NewRandomWalk(3)
+	cell := gridmath.Cell{X: 4, Y: 4}
+	others := []gridmath.Vec{{X: 8.5, Y: 4.5}}
+	counts := map[protocol.Direction]int{}
+	for i := 0; i < 1000; i++ {
+		d := rw.Next(g, cell, protocol.DirUp, nil, others)
+		if d == protocol.DirDown || !g.CanMove(cell, d) {
+			t.Fatalf("picked %s", d)
+		}
+		counts[d]++
+	}
+	if counts[protocol.DirLeft] <= 2*counts[protocol.DirRight] {
+		t.Fatalf("expected a strong bias away from the other catcher, got %v", counts)
+	}
+	if counts[protocol.DirRight] == 0 {
+		t.Fatalf("bias must not rule out branches entirely: %v", counts)
+	}
+}
+
+// wallMover always drives into the north wall; the match must keep the
+// catcher moving along the corridor anyway.
+type wallMover struct{}
+
+func (wallMover) Next(gridmath.Grid, gridmath.Cell, protocol.Direction, []gridmath.Vec, []gridmath.Vec) protocol.Direction {
+	return protocol.DirUp
+}
+
+func TestCatchersKeepMovingContinuously(t *testing.T) {
+	gen := protocol.MazeGenerateResponse{
+		Maze: openMaze(6, 6), Seed: 7,
+		RunnerSpawns:  []protocol.Point{{X: 5.5, Y: 5.5}, {X: 5.5, Y: 0.5}},
+		CatcherSpawns: []protocol.Point{{X: 0.5, Y: 0.5}, {X: 2.5, Y: 2.5}},
+	}
+	for name, mover := range map[string]func(int) Mover{
+		"random_walk":   func(i int) Mover { return NewRandomWalk(int64(i)) },
+		"walled_answer": func(int) Mover { return wallMover{} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, gen, mover)
+			req := twoRunnerRequest()
+			req.Config.Catchers = 2
+			req.Config.RoundSeconds = 60
+			m, _, err := f.svc.CreateMatch(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			perTick := protocol.RunnerSpeed * req.Config.CatcherSpeed * tickDT
+			prev := m.State().Snapshot.Catchers
+			for tick := 0; tick < 200 && !m.Ended(); tick++ {
+				f.svc.Step(context.Background(), m)
+				cur := m.State().Snapshot.Catchers
+				for i := range cur {
+					moved := gridmath.Dist(gridmath.Vec{X: prev[i].X, Y: prev[i].Y}, gridmath.Vec{X: cur[i].X, Y: cur[i].Y})
+					if math.Abs(moved-perTick) > 1e-6 || cur[i].Dir == protocol.DirNone {
+						t.Fatalf("tick %d catcher %s moved %.4f (want %.4f) dir=%q", tick+1, cur[i].ID, moved, perTick, cur[i].Dir)
+					}
+				}
+				prev = cur
+			}
+		})
 	}
 }
 

@@ -99,6 +99,13 @@ type Server struct {
 type room struct {
 	members map[string]bool
 	matchID string
+	// spectators are members who joined while matchID was set; they receive
+	// frames but their input is never forwarded to the simulation.
+	spectators map[string]bool
+}
+
+func newRoom() *room {
+	return &room{members: map[string]bool{}, spectators: map[string]bool{}}
 }
 
 type conn struct {
@@ -247,28 +254,61 @@ func (s *Server) onJoin(ctx context.Context, c *conn, code string) {
 }
 
 // joinAsSpectator handles a (re)connect into a room whose match is running:
-// the client gets a spectator match_start plus the latest snapshot.
+// the client gets a spectator match_start plus the latest snapshot. The
+// simulation is only read, never told about the spectator, so the tick loop
+// and the runners' state are untouched.
+//
+// Membership is recorded and the two frames written while holding the
+// connection's write lock, so a live snapshot fanned out concurrently can
+// never land in front of the (older) snapshot fetched here.
 func (s *Server) joinAsSpectator(ctx context.Context, c *conn, code, matchID string) {
 	var st protocol.SimMatchStateResponse
 	if err := s.sim.Get(ctx, "/matches/"+matchID, &st); err != nil {
 		c.sendPeerError(ctx, err)
 		return
 	}
-	s.mu.Lock()
-	s.place(c.playerID, code)
-	s.mu.Unlock()
+	if st.Ended {
+		s.mu.Lock()
+		if r := s.rooms[code]; r != nil && r.matchID == matchID {
+			r.matchID = ""
+		}
+		s.mu.Unlock()
+		c.sendError(ctx, protocol.ErrNotFound, "match already ended, join again")
+		return
+	}
 
 	start := st.Start
 	start.T = protocol.TypeMatchStart
 	if start.MatchID == "" {
 		start.MatchID = matchID
 	}
-	start.You.PlayerID = c.playerID
-	start.You.Role = protocol.RoleSpectator
-	c.send(ctx, start)
+	start.You = protocol.You{PlayerID: c.playerID, Role: protocol.RoleSpectator}
 	snap := st.Snapshot
 	snap.T = protocol.TypeSnapshot
-	c.send(ctx, snap)
+	startData, err := protocol.Encode(start)
+	if err != nil {
+		log.Printf("[gateway] encode: %v", err)
+		return
+	}
+	snapData, err := protocol.Encode(snap)
+	if err != nil {
+		log.Printf("[gateway] encode: %v", err)
+		return
+	}
+
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	s.mu.Lock()
+	if r := s.rooms[code]; r == nil || r.matchID != matchID {
+		s.mu.Unlock()
+		c.writeLocked(ctx, encodeOrLog(protocol.NewError(protocol.ErrNotFound, "match already ended, join again")))
+		return
+	}
+	s.place(c.playerID, code)
+	s.rooms[code].spectators[c.playerID] = true
+	s.mu.Unlock()
+	c.writeLocked(ctx, startData)
+	c.writeLocked(ctx, snapData)
 }
 
 func (s *Server) onInput(ctx context.Context, c *conn, m *protocol.Input) {
@@ -281,9 +321,13 @@ func (s *Server) onInput(ctx context.Context, c *conn, m *protocol.Input) {
 		c.sendError(ctx, protocol.ErrNotInRoom, "not in a room")
 		return
 	}
-	matchID := s.matchOf(code)
+	matchID, spectator := s.matchAndRole(code, c.playerID)
 	if matchID == "" {
 		c.sendError(ctx, protocol.ErrBadRequest, "room is not in a match")
+		return
+	}
+	if spectator {
+		c.sendError(ctx, protocol.ErrForbidden, "spectators cannot send input")
 		return
 	}
 	req := protocol.SimInputRequest{PlayerID: c.playerID, Seq: m.Seq, Dir: m.Dir}
@@ -319,7 +363,7 @@ func (s *Server) recordRoom(rs protocol.RoomState) {
 	defer s.mu.Unlock()
 	r := s.rooms[rs.Code]
 	if r == nil {
-		r = &room{members: map[string]bool{}}
+		r = newRoom()
 		s.rooms[rs.Code] = r
 	}
 	seen := map[string]bool{}
@@ -330,6 +374,7 @@ func (s *Server) recordRoom(rs protocol.RoomState) {
 	for id := range r.members {
 		if !seen[id] && r.matchID == "" {
 			delete(r.members, id)
+			delete(r.spectators, id)
 			if s.where[id] == rs.Code {
 				delete(s.where, id)
 			}
@@ -345,6 +390,7 @@ func (s *Server) place(playerID, code string) {
 	if old, ok := s.where[playerID]; ok && old != code {
 		if r := s.rooms[old]; r != nil {
 			delete(r.members, playerID)
+			delete(r.spectators, playerID)
 			if len(r.members) == 0 {
 				delete(s.rooms, old)
 			}
@@ -352,7 +398,7 @@ func (s *Server) place(playerID, code string) {
 	}
 	r := s.rooms[code]
 	if r == nil {
-		r = &room{members: map[string]bool{}}
+		r = newRoom()
 		s.rooms[code] = r
 	}
 	r.members[playerID] = true
@@ -369,6 +415,7 @@ func (s *Server) forget(playerID string) {
 	delete(s.where, playerID)
 	if r := s.rooms[code]; r != nil {
 		delete(r.members, playerID)
+		delete(r.spectators, playerID)
 		if len(r.members) == 0 {
 			delete(s.rooms, code)
 		}
@@ -383,12 +430,19 @@ func (s *Server) roomOf(playerID string) (string, bool) {
 }
 
 func (s *Server) matchOf(code string) string {
+	id, _ := s.matchAndRole(code, "")
+	return id
+}
+
+// matchAndRole returns the room's current match id and whether playerID is
+// spectating it.
+func (s *Server) matchAndRole(code, playerID string) (matchID string, spectator bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if r := s.rooms[code]; r != nil {
-		return r.matchID
+		return r.matchID, r.spectators[playerID]
 	}
-	return ""
+	return "", false
 }
 
 func (s *Server) dropConn(c *conn) {
@@ -459,14 +513,16 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	rm := s.rooms[push.RoomCode]
 	if rm == nil {
-		rm = &room{members: map[string]bool{}}
+		rm = newRoom()
 		s.rooms[push.RoomCode] = rm
 	}
 	if push.MatchID != "" && rm.matchID == "" {
 		rm.matchID = push.MatchID
+		rm.spectators = map[string]bool{}
 	}
 	if ended {
 		rm.matchID = ""
+		rm.spectators = map[string]bool{}
 	}
 	s.mu.Unlock()
 
@@ -574,9 +630,25 @@ func (c *conn) sendPeerError(ctx context.Context, err error) {
 	c.sendError(ctx, protocol.ErrInternal, err.Error())
 }
 
+func encodeOrLog(msg any) []byte {
+	data, err := protocol.Encode(msg)
+	if err != nil {
+		log.Printf("[gateway] encode: %v", err)
+	}
+	return data
+}
+
 func (c *conn) write(ctx context.Context, data []byte) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
+	c.writeLocked(ctx, data)
+}
+
+// writeLocked writes one frame; the caller holds c.wmu.
+func (c *conn) writeLocked(ctx context.Context, data []byte) {
+	if data == nil {
+		return
+	}
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
 	if err := c.ws.Write(wctx, websocket.MessageText, data); err != nil {

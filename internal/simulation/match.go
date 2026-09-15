@@ -141,8 +141,15 @@ func (m *Match) Step(nowMS int64) StepResult {
 		r.pos, r.moving = m.grid.Step(r.pos, r.want, protocol.RunnerSpeed, tickDT)
 		runnerPos = append(runnerPos, r.pos)
 	}
-	for _, c := range m.catchers {
-		m.moveCatcher(c, runnerPos)
+	others := make([]gridmath.Vec, 0, len(m.catchers))
+	for i, c := range m.catchers {
+		others = others[:0]
+		for j, o := range m.catchers {
+			if j != i {
+				others = append(others, o.pos)
+			}
+		}
+		m.moveCatcher(c, runnerPos, others)
 	}
 
 	var frames []json.RawMessage
@@ -183,15 +190,20 @@ func (m *Match) Step(nowMS int64) StepResult {
 
 // moveCatcher travels along the corridor and consults the Mover every time
 // the catcher sits on a cell center, so turns only happen at intersections.
-func (m *Match) moveCatcher(c *catcher, runners []gridmath.Vec) {
+// DirNone parks the catcher; a walled-off answer is replaced by the corridor
+// fallback (straight on, else any legal exit) so a buggy brain never stalls it.
+func (m *Match) moveCatcher(c *catcher, runners, others []gridmath.Vec) {
 	remaining := c.speed * tickDT
 	for i := 0; remaining > 1e-9 && i < 8; i++ {
 		if gridmath.AtCenter(c.pos, centerTol) {
 			cell := gridmath.CellOf(c.pos)
 			c.pos = cell.Center()
-			c.dir = c.mover.Next(m.grid, cell, c.dir, runners)
-			if c.dir == protocol.DirNone || !m.grid.CanMove(cell, c.dir) {
-				c.dir = protocol.DirNone
+			next := c.mover.Next(m.grid, cell, c.dir, runners, others)
+			if next != protocol.DirNone && !m.grid.CanMove(cell, next) {
+				next = fallbackDir(m.grid, cell, c.dir)
+			}
+			c.dir = next
+			if c.dir == protocol.DirNone {
 				return
 			}
 		}
@@ -205,6 +217,20 @@ func (m *Match) moveCatcher(c *catcher, runners []gridmath.Vec) {
 			return
 		}
 	}
+}
+
+// fallbackDir keeps a catcher moving when its Mover has no answer: straight
+// on if the corridor continues, otherwise the first legal exit that is not a
+// reversal, otherwise back the way it came.
+func fallbackDir(g gridmath.Grid, cell gridmath.Cell, cur protocol.Direction) protocol.Direction {
+	if g.CanMove(cell, cur) {
+		return cur
+	}
+	fwd := forwardDirs(g, cell, cur)
+	if len(fwd) == 0 {
+		return protocol.DirNone
+	}
+	return fwd[0]
 }
 
 // distToNextCenter is the distance along d from p to the next cell center it

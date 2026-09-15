@@ -113,6 +113,7 @@ type fakeSim struct {
 		req   protocol.SimInputRequest
 	}
 	gotInput chan struct{}
+	ended    bool
 }
 
 func (f *fakeSim) handler() http.Handler {
@@ -130,7 +131,11 @@ func (f *fakeSim) handler() http.Handler {
 		w.WriteHeader(204)
 	})
 	mux.HandleFunc("GET /matches/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		ended := f.ended
+		f.mu.Unlock()
 		httpx.WriteJSON(w, 200, protocol.SimMatchStateResponse{
+			Ended: ended,
 			Start: protocol.MatchStart{T: protocol.TypeMatchStart, MatchID: r.PathValue("id"),
 				Maze: protocol.Maze{W: 1, H: 1, Walls: protocol.Walls{15}},
 				You:  protocol.You{Role: protocol.RoleSpectator}, RoundMS: 1000},
@@ -426,6 +431,62 @@ func TestPushMatchStartInputAndReconnect(t *testing.T) {
 	if sn := b2.recv().(*protocol.Snapshot); sn.Tick != 9 {
 		t.Fatalf("spectator expected tick 9, got %#v", sn)
 	}
+
+	// spectator input is refused at the gateway and never reaches the simulation
+	b2.send(protocol.Input{T: protocol.TypeInput, Seq: 1, Dir: protocol.DirLeft})
+	if er, ok := b2.recv().(*protocol.Error); !ok || er.Code != protocol.ErrForbidden {
+		t.Fatalf("expected forbidden for spectator input, got %#v", er)
+	}
+	a.send(protocol.Input{T: protocol.TypeInput, Seq: 5, Dir: protocol.DirLeft})
+	<-e.sim.gotInput
+	e.sim.mu.Lock()
+	for _, in := range e.sim.inputs {
+		if in.req.PlayerID == b2.id {
+			t.Fatalf("spectator input forwarded to simulation: %#v", in)
+		}
+	}
+	e.sim.mu.Unlock()
+
+	// a fresh tab (never seen before) joining mid-match is also a spectator
+	c := e.dial()
+	c.hello("cy")
+	c.send(protocol.JoinRoom{T: protocol.TypeJoinRoom, Code: "ABCD"})
+	if ms, ok := c.recv().(*protocol.MatchStart); !ok || ms.You.Role != protocol.RoleSpectator || ms.You.PlayerID != c.id {
+		t.Fatalf("expected spectator match_start for fresh tab, got %#v", ms)
+	}
+	if _, ok := c.recv().(*protocol.Snapshot); !ok {
+		t.Fatal("fresh tab expected snapshot")
+	}
+	// the runner's stream is undisturbed: a targeted push still reaches only a
+	if n := e.push(protocol.GatewayPush{MatchID: "m1", RoomCode: "ABCD", PlayerIDs: []string{a.id}, Frames: []json.RawMessage{raw(t, protocol.Event{T: protocol.TypeEvent, Kind: protocol.EventCaught, PlayerID: a.id})}}); n != 1 {
+		t.Fatalf("targeted push delivered to %d", n)
+	}
+	if ev, ok := a.recv().(*protocol.Event); !ok || ev.Kind != protocol.EventCaught {
+		t.Fatalf("expected caught event, got %#v", ev)
+	}
+
+	// simulation already reports the match ended -> not_found, mapping dropped
+	e.sim.mu.Lock()
+	e.sim.ended = true
+	e.sim.mu.Unlock()
+	d := e.dial()
+	d.hello("di")
+	d.send(protocol.JoinRoom{T: protocol.TypeJoinRoom, Code: "ABCD"})
+	if er, ok := d.recv().(*protocol.Error); !ok || er.Code != protocol.ErrNotFound {
+		t.Fatalf("expected not_found for ended match, got %#v", er)
+	}
+	d.send(protocol.JoinRoom{T: protocol.TypeJoinRoom, Code: "ABCD"})
+	if er, ok := d.recv().(*protocol.Error); !ok || er.Code != protocol.ErrInMatch {
+		t.Fatalf("expected matchmaking in_match once the mapping is dropped, got %#v", er)
+	}
+	e.sim.mu.Lock()
+	e.sim.ended = false
+	e.sim.mu.Unlock()
+	// a later push re-learns the mapping
+	e.push(protocol.GatewayPush{MatchID: "m1", RoomCode: "ABCD", Frames: []json.RawMessage{raw(t, protocol.Snapshot{T: protocol.TypeSnapshot, Tick: 10})}})
+	a.recv()
+	b2.recv()
+	c.recv()
 
 	// match_end clears the mapping; input is rejected again
 	e.push(protocol.GatewayPush{MatchID: "m1", RoomCode: "ABCD", Frames: []json.RawMessage{raw(t, protocol.MatchEnd{T: protocol.TypeMatchEnd, MatchID: "m1"})}})
