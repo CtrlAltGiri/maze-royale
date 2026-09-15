@@ -35,7 +35,8 @@ Every service answers `GET /healthz` -> `{service, version, ok}`.
 | `input` | `seq` (int, monotonically increasing per client), `dir` ∈ `up`,`down`,`left`,`right`,`none` |
 | `ping` | `ts` (client millis) |
 
-Clients send intent only. They never assert position.
+Clients send intent only. They never assert position. `hello` must precede
+every frame except `ping`, which is answered with `pong` at any time.
 
 ## Gateway -> client
 

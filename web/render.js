@@ -51,14 +51,21 @@ function toPx(lay, x, y) {
 }
 
 function drawTag(ctx, px, py, r, text) {
-  ctx.font = `bold ${Math.max(10, Math.round(r * 1.1))}px system-ui, sans-serif`;
+  const size = Math.max(10, Math.round(r * 1.1));
+  ctx.font = `bold ${size}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
   ctx.lineWidth = 3;
+  let ty = py - r - 3;
+  if (ty - size < 0) {
+    ctx.textBaseline = 'top';
+    ty = py + r + 3;
+  } else {
+    ctx.textBaseline = 'bottom';
+  }
   ctx.strokeStyle = COLORS.tagShadow;
-  ctx.strokeText(text, px, py - r - 3);
+  ctx.strokeText(text, px, ty);
   ctx.fillStyle = COLORS.tag;
-  ctx.fillText(text, px, py - r - 3);
+  ctx.fillText(text, px, ty);
 }
 
 // runner: {x, y, color, name, alive, isYou, deathProgress (0..1 or null)}

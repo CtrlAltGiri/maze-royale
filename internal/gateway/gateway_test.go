@@ -254,6 +254,10 @@ func TestHelloWelcomePingPong(t *testing.T) {
 	e := newEnv(t)
 	c := e.dial()
 	c.send(protocol.Ping{T: protocol.TypePing, TS: 1})
+	if p, ok := c.recv().(*protocol.Pong); !ok || p.TS != 1 {
+		t.Fatalf("expected pong before hello, got %#v", p)
+	}
+	c.send(protocol.SetReady{T: protocol.TypeSetReady, Ready: true})
 	if er, ok := c.recv().(*protocol.Error); !ok || er.Code != protocol.ErrBadRequest {
 		t.Fatalf("expected bad_request before hello, got %#v", er)
 	}

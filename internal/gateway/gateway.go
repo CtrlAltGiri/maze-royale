@@ -164,6 +164,10 @@ func (s *Server) dispatch(ctx context.Context, c *conn, raw []byte) {
 		c.sendError(ctx, protocol.ErrBadRequest, err.Error())
 		return
 	}
+	if p, ok := msg.(*protocol.Ping); ok {
+		c.send(ctx, protocol.Pong{T: protocol.TypePong, TS: p.TS})
+		return
+	}
 	if _, ok := msg.(*protocol.Hello); !ok && c.playerID == "" {
 		c.sendError(ctx, protocol.ErrBadRequest, "send hello first")
 		return
@@ -207,8 +211,6 @@ func (s *Server) dispatch(ctx context.Context, c *conn, raw []byte) {
 		s.finishRoomMutation(ctx, c, &res, err)
 	case *protocol.Input:
 		s.onInput(ctx, c, m)
-	case *protocol.Ping:
-		c.send(ctx, protocol.Pong{T: protocol.TypePong, TS: m.TS})
 	default:
 		c.sendError(ctx, protocol.ErrUnsupported, fmt.Sprintf("unexpected client frame %T", msg))
 	}
