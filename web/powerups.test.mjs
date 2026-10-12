@@ -159,7 +159,10 @@ function installDOM() {
     const q = rafQueue.splice(0);
     for (const cb of q) cb(now);
   };
-  return { ids, canvas, document_, pump };
+  const keydown = (key, repeat = false) => {
+    for (const h of listeners.keydown || []) h({ key, repeat, preventDefault() {} });
+  };
+  return { ids, canvas, document_, pump, keydown, listeners };
 }
 
 function fakeNet() {
@@ -170,6 +173,7 @@ function fakeNet() {
     sent,
     send(o) { sent.push(o); },
     input(d) { sent.push({ t: 'input', dir: d }); },
+    shoot() { sent.push({ t: 'shoot' }); },
     on(type, h) {
       if (!handlers.has(type)) handlers.set(type, new Set());
       handlers.get(type).add(h);
@@ -201,9 +205,10 @@ test('startGame shows snapshot-driven power badges and renders live pickups', ()
   assert.ok(hud, 'hud missing');
   const powers = hud.children.find(c => c.className === 'hud-powers');
   assert.ok(powers, 'hud-powers row missing');
-  const [speedBadge, invisBadge, hint] = powers.children;
+  const [speedBadge, invisBadge, gunBadge, hint] = powers.children;
   assert.equal(speedBadge.hidden, true, 'speed badge hidden before any effect');
   assert.equal(invisBadge.hidden, true);
+  assert.equal(gunBadge.hidden, true, 'gun badge hidden without has_gun');
   assert.equal(hint.hidden, false, 'hint visible while no effect is active');
 
   pump(16);
@@ -264,6 +269,106 @@ test('startGame shows snapshot-driven power badges and renders live pickups', ()
   assert.ok(!net.sent.some(o => /power|pickup/i.test(JSON.stringify(o))), 'client must not send pickup commands');
 
   ids.overlay.hidden = true;
+});
+
+test('drawPowerUp renders the gun pickup in orange', () => {
+  const canvas = fakeCanvas();
+  const ctx = canvas.getContext();
+  const lay = render.layout(canvas, maze);
+  render.drawPowerUp(ctx, lay, { id: 'power5', kind: 'gun', x: 1.5, y: 1.5 }, 100);
+  assert.ok(ctx.ops.some(o => o[0] === 'translate' && o[1] === lay.ox + 1.5 * lay.cell && o[2] === lay.oy + 1.5 * lay.cell),
+    'gun pickup must draw at its own position');
+  const fills = ctx.ops.filter(o => o[0] === 'fill' || o[0] === 'fillRect').map(o => o[1]);
+  assert.ok(fills.includes('#ff7043'), `expected orange gun body, got ${JSON.stringify(fills)}`);
+  assert.ok(!fills.includes('#ffd54f') && !fills.includes('#ce93d8'), 'gun must be distinct from speed/invisibility');
+});
+
+test('drawBullet renders a bright dot with a tail and flows through drawFrame', () => {
+  const canvas = fakeCanvas();
+  const ctx = canvas.getContext();
+  const lay = render.layout(canvas, maze);
+  render.drawBullet(ctx, lay, { id: 'b1', x: 1.5, y: 0.5, dir: 'right' });
+  const strokes = ctx.ops.filter(o => o[0] === 'stroke').map(o => o[1]);
+  assert.ok(strokes.includes('#ffee58'), `expected bright tail, got ${JSON.stringify(strokes)}`);
+  const fills = ctx.ops.filter(o => o[0] === 'fill').map(o => o[1]);
+  assert.ok(fills.includes('#ffee58'), 'expected bright bullet dot');
+
+  ctx.ops.length = 0;
+  render.drawFrame(ctx, canvas, {
+    maze,
+    runners: [],
+    catchers: [],
+    bullets: [{ id: 'b1', x: 1.5, y: 0.5, dir: 'right' }],
+    now: 50,
+  });
+  const frameFills = ctx.ops.filter(o => o[0] === 'fill').map(o => o[1]);
+  assert.ok(frameFills.includes('#ffee58'), 'bullet should be drawn from the scene');
+});
+
+test('downed catcher renders desaturated with X eyes', () => {
+  const canvas = fakeCanvas();
+  const ctx = canvas.getContext();
+  const lay = render.layout(canvas, maze);
+  render.drawCatcher(ctx, lay, { x: 1.5, y: 1.5, dir: 'none', down: true });
+  const fills = ctx.ops.filter(o => o[0] === 'fill').map(o => o[1]);
+  assert.ok(fills.includes('rgba(229,57,53,0.4)'), `expected faded body, got ${JSON.stringify(fills)}`);
+  const strokes = ctx.ops.filter(o => o[0] === 'stroke').map(o => o[1]);
+  assert.ok(strokes.includes('#fff'), 'expected white X eyes');
+
+  ctx.ops.length = 0;
+  render.drawCatcher(ctx, lay, { x: 1.5, y: 1.5, dir: 'none' });
+  const fills2 = ctx.ops.filter(o => o[0] === 'fill').map(o => o[1]);
+  assert.ok(fills2.includes('#e53935'), 'normal catcher must keep the solid body');
+});
+
+test('space sends a shoot frame only while the local player has the gun', () => {
+  const { canvas, pump, keydown } = installDOM();
+  const net = fakeNet();
+  const dom = globalThis.document;
+  game.startGame(net, matchStart);
+
+  keydown(' ');
+  assert.ok(!net.sent.some(o => o.t === 'shoot'), 'no shot without has_gun');
+
+  net.emit('snapshot', {
+    t: 'snapshot', tick: 1, ts: 1000,
+    players: [
+      { id: 'p1', x: 0.5, y: 0.5, dir: 'none', alive: true, has_gun: true },
+      { id: 'p2', x: 2.5, y: 2.5, dir: 'none', alive: true },
+    ],
+    catchers: [{ id: 'c1', x: 1.5, y: 1.5, dir: 'none', down_ms: 1500 }],
+    power_ups: [], bullets: [{ id: 'b1', x: 1.0, y: 0.5, dir: 'right' }],
+    time_left_ms: 29950, alive_count: 2,
+  });
+  const hud = dom.body.children.find(c => c.id === 'hud');
+  const powers = hud.children.find(c => c.className === 'hud-powers');
+  const gunBadge = powers.children[2];
+  assert.equal(gunBadge.hidden, false, 'gun badge visible while has_gun is set');
+  assert.match(gunBadge.textContent, /Gun/);
+
+  canvas._ctx.ops.length = 0;
+  pump(16);
+  const fills = canvas._ctx.ops.filter(o => o[0] === 'fill').map(o => o[1]);
+  assert.ok(fills.includes('#ffee58'), 'snapshot bullet should render');
+  const cFills = canvas._ctx.ops.filter(o => o[0] === 'fill' && o[1] === 'rgba(229,57,53,0.4)');
+  assert.ok(cFills.length > 0, 'down_ms catcher should render downed');
+
+  keydown(' ');
+  assert.ok(net.sent.some(o => o.t === 'shoot'), `expected a shoot frame, sent ${JSON.stringify(net.sent)}`);
+
+  net.sent.length = 0;
+  net.emit('snapshot', {
+    t: 'snapshot', tick: 2, ts: 1050,
+    players: [
+      { id: 'p1', x: 0.5, y: 0.5, dir: 'none', alive: true },
+      { id: 'p2', x: 2.5, y: 2.5, dir: 'none', alive: true },
+    ],
+    catchers: [{ id: 'c1', x: 1.5, y: 1.5, dir: 'none' }],
+    power_ups: [], bullets: [], time_left_ms: 29900, alive_count: 2,
+  });
+  assert.equal(gunBadge.hidden, true, 'gun badge hides once the gun is spent');
+  keydown(' ');
+  assert.ok(!net.sent.some(o => o.t === 'shoot'), 'no shot after the gun is spent');
 });
 
 test('startGame without power fields is safe', () => {

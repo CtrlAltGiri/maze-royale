@@ -173,6 +173,11 @@ button.danger { background: var(--danger); border-color: transparent; }
   border: 1px solid #ce93d8;
   background: rgba(206, 147, 216, 0.12);
 }
+#hud .power-badge.gun {
+  color: #ff7043;
+  border: 1px solid #ff7043;
+  background: rgba(255, 112, 67, 0.12);
+}
 #hud .power-hint {
   color: var(--muted);
   font-size: 0.75rem;

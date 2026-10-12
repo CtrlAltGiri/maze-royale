@@ -237,8 +237,15 @@ func TestSecondCatchLeavesLastRunnerStanding(t *testing.T) {
 		t.Fatalf("standing[2] %+v", end.Standings[2])
 	}
 	events := f.rec.frames(protocol.TypeEvent)
-	if len(events) != 2 {
-		t.Fatalf("expected two caught events, got %d", len(events))
+	caught := 0
+	for _, raw := range events {
+		var ev protocol.Event
+		if json.Unmarshal(raw, &ev) == nil && ev.Kind == protocol.EventCaught {
+			caught++
+		}
+	}
+	if caught != 2 {
+		t.Fatalf("expected two caught events, got %d of %v", caught, events)
 	}
 	if len(f.rec.results) != 1 || len(f.rec.results[0].Standings) != 3 || f.rec.results[0].WinnerIDs[0] != "p3" {
 		t.Fatalf("stats %+v", f.rec.results)
@@ -261,7 +268,7 @@ func TestSimultaneousCatchTiesShareStanding(t *testing.T) {
 	if !res.Ended || res.End == nil {
 		t.Fatalf("both caught should leave one runner and end: %+v", res)
 	}
-	if len(res.Frames) != 4 { // snapshot, 2 events, match_end
+	if len(res.Frames) != 5 { // snapshot, gun collect, 2 caught events, match_end
 		t.Fatalf("frames %d", len(res.Frames))
 	}
 	st := res.End.Standings

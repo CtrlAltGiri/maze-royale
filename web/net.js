@@ -65,6 +65,7 @@ export class Net {
   setReady(ready) { this.send({ t: "set_ready", ready: !!ready }); }
   startRoom() { this.send({ t: "start_room" }); }
   input(dir) { this.send({ t: "input", seq: ++this.inputSeq, dir }); }
+  shoot() { this.send({ t: "shoot" }); }
 
   _open() {
     clearTimeout(this._reconnectTimer);

@@ -35,7 +35,8 @@ type Config struct {
 	Now func() time.Time
 	// ManualTick disables the wall clock ticker so tests drive Step themselves.
 	ManualTick bool
-	// NewMover builds the catcher brain for a match; nil means RandomWalk.
+	// NewMover builds the catcher brain for a match; nil means Chaser; pass
+	// NewRandomWalk to get the wandering v1 brain.
 	NewMover func(seed int64, index int) Mover
 }
 
@@ -74,7 +75,7 @@ func New(cfg Config) *Service {
 		cfg.Now = time.Now
 	}
 	if cfg.NewMover == nil {
-		cfg.NewMover = func(seed int64, index int) Mover { return NewRandomWalk(seed + int64(index)) }
+		cfg.NewMover = func(seed int64, index int) Mover { return NewChaser(seed + int64(index)) }
 	}
 	s := &Service{
 		cfg:     cfg,
@@ -106,6 +107,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /matches", s.handleCreate)
 	mux.HandleFunc("GET /matches/{id}", s.handleGet)
 	mux.HandleFunc("POST /matches/{id}/input", s.handleInput)
+	mux.HandleFunc("POST /matches/{id}/shoot", s.handleShoot)
 	return mux
 }
 
@@ -199,13 +201,14 @@ func (s *Service) CreateMatch(ctx context.Context, req protocol.SimCreateMatchRe
 		id:       httpx.NewRequestID(),
 		roomCode: req.RoomCode,
 		grid:     gridmath.Grid{M: gen.Maze},
+		center:   gridmath.Cell{X: gen.Maze.W / 2, Y: gen.Maze.H / 2}.Center(),
 		roundMS:  int64(req.Config.RoundSeconds) * 1000,
 	}
 	for i, p := range req.Players {
 		sp := gen.RunnerSpawns[i%len(gen.RunnerSpawns)]
 		m.runners = append(m.runners, &runner{
 			id: p.PlayerID, name: p.Name, color: p.Color, isBot: p.IsBot,
-			pos: gridmath.Vec{X: sp.X, Y: sp.Y}, want: protocol.DirNone, moving: protocol.DirNone, alive: true,
+			pos: gridmath.Vec{X: sp.X, Y: sp.Y}, want: protocol.DirNone, moving: protocol.DirNone, facing: protocol.DirNone, alive: true,
 		})
 	}
 	speed := protocol.RunnerSpeed * req.Config.CatcherSpeed
@@ -283,6 +286,24 @@ func (s *Service) handleInput(w http.ResponseWriter, r *http.Request) {
 	}
 	if !m.Input(in.PlayerID, in.Seq, in.Dir) {
 		httpx.WriteError(w, http.StatusNotFound, protocol.ErrNotFound, "player not in match")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, json.RawMessage(`{"ok":true}`))
+}
+
+func (s *Service) handleShoot(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.Match(r.PathValue("id"))
+	if !ok {
+		httpx.WriteError(w, http.StatusNotFound, protocol.ErrNotFound, "no such match")
+		return
+	}
+	var in protocol.SimShootRequest
+	if err := httpx.ReadJSON(r, &in); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, protocol.ErrBadRequest, err.Error())
+		return
+	}
+	if !m.Shoot(in.PlayerID) {
+		httpx.WriteError(w, http.StatusNotFound, protocol.ErrNotFound, "player not in match or has no gun")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, json.RawMessage(`{"ok":true}`))

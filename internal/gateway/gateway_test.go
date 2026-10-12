@@ -112,7 +112,12 @@ type fakeSim struct {
 		match string
 		req   protocol.SimInputRequest
 	}
+	shoots []struct {
+		match string
+		req   protocol.SimShootRequest
+	}
 	gotInput chan struct{}
+	gotShoot chan struct{}
 	ended    bool
 }
 
@@ -128,6 +133,18 @@ func (f *fakeSim) handler() http.Handler {
 		}{r.PathValue("id"), req})
 		f.mu.Unlock()
 		f.gotInput <- struct{}{}
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("POST /matches/{id}/shoot", func(w http.ResponseWriter, r *http.Request) {
+		var req protocol.SimShootRequest
+		_ = httpx.ReadJSON(r, &req)
+		f.mu.Lock()
+		f.shoots = append(f.shoots, struct {
+			match string
+			req   protocol.SimShootRequest
+		}{r.PathValue("id"), req})
+		f.mu.Unlock()
+		f.gotShoot <- struct{}{}
 		w.WriteHeader(204)
 	})
 	mux.HandleFunc("GET /matches/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +174,7 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	mm := &fakeMM{}
-	sim := &fakeSim{gotInput: make(chan struct{}, 16)}
+	sim := &fakeSim{gotInput: make(chan struct{}, 16), gotShoot: make(chan struct{}, 16)}
 	mmSrv := httptest.NewServer(mm.handler())
 	simSrv := httptest.NewServer(sim.handler())
 	statsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -508,6 +525,69 @@ func TestPushMatchStartInputAndReconnect(t *testing.T) {
 	if er, ok := a.recv().(*protocol.Error); !ok || er.Code != protocol.ErrBadRequest {
 		t.Fatalf("expected bad_request after match_end, got %#v", er)
 	}
+}
+
+func TestShootFanout(t *testing.T) {
+	e := newEnv(t)
+	a, b := e.dial(), e.dial()
+	a.hello("ana")
+	b.hello("bo")
+	a.send(protocol.CreateRoom{T: protocol.TypeCreateRoom, Config: protocol.DefaultRoomConfig()})
+	a.recv()
+	b.send(protocol.JoinRoom{T: protocol.TypeJoinRoom, Code: "ABCD"})
+	a.recv()
+	b.recv()
+
+	// shoot before a match is known -> error
+	a.send(protocol.Shoot{T: protocol.TypeShoot})
+	if er, ok := a.recv().(*protocol.Error); !ok || er.Code != protocol.ErrBadRequest {
+		t.Fatalf("expected bad_request, got %#v", er)
+	}
+
+	startFor := func(id string) json.RawMessage {
+		return raw(t, protocol.MatchStart{T: protocol.TypeMatchStart, MatchID: "m1", You: protocol.You{PlayerID: id, Role: protocol.RoleRunner}})
+	}
+	e.push(protocol.GatewayPush{MatchID: "m1", RoomCode: "ABCD", PlayerIDs: []string{a.id}, Frames: []json.RawMessage{startFor(a.id)}})
+	e.push(protocol.GatewayPush{MatchID: "m1", RoomCode: "ABCD", PlayerIDs: []string{b.id}, Frames: []json.RawMessage{startFor(b.id)}})
+	a.recv()
+	b.recv()
+
+	// shoot routes to /matches/m1/shoot
+	a.send(protocol.Shoot{T: protocol.TypeShoot})
+	select {
+	case <-e.sim.gotShoot:
+	case <-time.After(2 * time.Second):
+		t.Fatal("simulation never received shoot")
+	}
+	e.sim.mu.Lock()
+	sh := e.sim.shoots[0]
+	e.sim.mu.Unlock()
+	if sh.match != "m1" || sh.req.PlayerID != a.id {
+		t.Fatalf("bad forwarded shoot: %#v", sh)
+	}
+
+	// spectator shoots are refused at the gateway and never reach the simulation
+	e.mm.mu.Lock()
+	e.mm.inMatch = true
+	e.mm.mu.Unlock()
+	c := e.dial()
+	c.hello("cy")
+	c.send(protocol.JoinRoom{T: protocol.TypeJoinRoom, Code: "ABCD"})
+	c.recv()
+	c.recv()
+	c.send(protocol.Shoot{T: protocol.TypeShoot})
+	if er, ok := c.recv().(*protocol.Error); !ok || er.Code != protocol.ErrForbidden {
+		t.Fatalf("expected forbidden for spectator shoot, got %#v", er)
+	}
+	a.send(protocol.Shoot{T: protocol.TypeShoot})
+	<-e.sim.gotShoot
+	e.sim.mu.Lock()
+	for _, sh := range e.sim.shoots {
+		if sh.req.PlayerID == c.id {
+			t.Fatalf("spectator shoot forwarded to simulation: %#v", sh)
+		}
+	}
+	e.sim.mu.Unlock()
 }
 
 func TestPushRejectsBadBody(t *testing.T) {

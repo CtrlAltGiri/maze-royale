@@ -61,8 +61,8 @@ func TestSeededPowerUpSpawnsDeterministicAndLegal(t *testing.T) {
 
 	snap1 := m1.State().Snapshot
 	snap2 := m2.State().Snapshot
-	if len(snap1.PowerUps) != 4 {
-		t.Fatalf("want 4 powerups, got %v", snap1.PowerUps)
+	if len(snap1.PowerUps) != 5 {
+		t.Fatalf("want 5 powerups, got %v", snap1.PowerUps)
 	}
 	if !slices.Equal(snap1.PowerUps, snap2.PowerUps) {
 		t.Fatalf("same seed must place identical powerups:\n%v\n%v", snap1.PowerUps, snap2.PowerUps)
@@ -75,6 +75,13 @@ func TestSeededPowerUpSpawnsDeterministicAndLegal(t *testing.T) {
 		}
 		ids[p.ID] = true
 		kinds[p.Kind]++
+		if p.Kind == protocol.PowerUpGun {
+			// The gun sits at the maze center even though a catcher spawns there.
+			if p.X != 7.5 || p.Y != 7.5 {
+				t.Fatalf("gun at %v want maze center (7.5,7.5)", p)
+			}
+			continue
+		}
 		legalPowerUpSpots(t, m1, p)
 		for j, o := range snap1.PowerUps {
 			if i != j && o.X == p.X && o.Y == p.Y {
@@ -82,8 +89,8 @@ func TestSeededPowerUpSpawnsDeterministicAndLegal(t *testing.T) {
 			}
 		}
 	}
-	if kinds[protocol.PowerUpSpeed] != 2 || kinds[protocol.PowerUpInvisibility] != 2 {
-		t.Fatalf("want two of each kind, got %v", kinds)
+	if kinds[protocol.PowerUpSpeed] != 2 || kinds[protocol.PowerUpInvisibility] != 2 || kinds[protocol.PowerUpGun] != 1 {
+		t.Fatalf("want two of each kind plus one gun, got %v", kinds)
 	}
 	if !slices.Equal(resp1.Starts["p1"].PowerUps, snap1.PowerUps) {
 		t.Fatalf("match_start powerups %v differ from snapshot %v", resp1.Starts["p1"].PowerUps, snap1.PowerUps)
@@ -426,6 +433,7 @@ func TestConstrainedMazeNoLegalSpawn(t *testing.T) {
 	m := &Match{
 		id:      "m-tiny",
 		grid:    gridmath.Grid{M: openMaze(1, 1)},
+		center:  gridmath.Cell{X: 0, Y: 0}.Center(),
 		roundMS: 30000,
 		runners: []*runner{
 			{id: "p1", name: "Ann", pos: gridmath.Vec{X: 0.5, Y: 0.5}, want: protocol.DirNone, alive: true},
@@ -433,14 +441,20 @@ func TestConstrainedMazeNoLegalSpawn(t *testing.T) {
 		powerUpRNG: rand.New(rand.NewSource(7)),
 	}
 	m.initPowerUps()
-	if got := m.activePowerUps(); len(got) != 0 {
-		t.Fatalf("1x1 maze must yield no powerups, got %v", got)
+	// The gun bypasses random placement: it is the only pickup a 1x1 maze gets.
+	got := m.activePowerUps()
+	if len(got) != 1 || got[0].Kind != protocol.PowerUpGun || got[0].X != 0.5 || got[0].Y != 0.5 {
+		t.Fatalf("1x1 maze should yield only the gun at center, got %v", got)
 	}
 	for i := 0; i < 200; i++ {
 		res := m.Step(int64(i))
 		if res.Ended {
 			break
 		}
+	}
+	// The runner is standing on the gun cell and collects it on tick 1.
+	if !m.runners[0].hasGun {
+		t.Fatal("runner should have collected the gun")
 	}
 	if got := m.State().Snapshot.PowerUps; len(got) != 0 {
 		t.Fatalf("snapshot should encode no pickups, got %v", got)
@@ -465,7 +479,7 @@ func TestPowerUpsInServiceStateAndPushes(t *testing.T) {
 	h := f.svc.Handler()
 	var create protocol.SimCreateMatchResponse
 	postJSON(t, h, "/matches", twoRunnerRequest(), &create)
-	if len(create.Starts["p1"].PowerUps) != 4 {
+	if len(create.Starts["p1"].PowerUps) != 5 {
 		t.Fatalf("create response power_ups %v", create.Starts["p1"].PowerUps)
 	}
 

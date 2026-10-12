@@ -135,7 +135,7 @@ func Neighbor(c Cell, d protocol.Direction) Cell {
 // It returns the new position and the direction actually being travelled
 // (DirNone when blocked).
 func (g Grid) Step(p Vec, d protocol.Direction, speed, dt float64) (Vec, protocol.Direction) {
-	if d == protocol.DirNone || speed <= 0 || dt <= 0 {
+	if d == protocol.DirNone || !d.Valid() || speed <= 0 || dt <= 0 {
 		return p, protocol.DirNone
 	}
 	remaining := speed * dt

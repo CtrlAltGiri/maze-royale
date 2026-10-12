@@ -446,6 +446,7 @@ func TestCatchersKeepMovingContinuously(t *testing.T) {
 	}
 	for name, mover := range map[string]func(int) Mover{
 		"random_walk":   func(i int) Mover { return NewRandomWalk(int64(i)) },
+		"chaser":        func(i int) Mover { return NewChaser(int64(i)) },
 		"walled_answer": func(int) Mover { return wallMover{} },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -531,5 +532,157 @@ func TestMatchEndPostsToGatewayAndStatsOverHTTP(t *testing.T) {
 	defer mu.Unlock()
 	if pushes[0].RoomCode != "ABCD" || pushes[0].MatchID != m.ID() || len(pushes[2].Frames) != 3 {
 		t.Fatalf("pushes %+v", pushes)
+	}
+}
+
+// wall adds a wall on side d of cell (and the matching side of the neighbour).
+func wall(m *protocol.Maze, c gridmath.Cell, d protocol.Direction) {
+	m.Walls[c.Y*m.W+c.X] |= gridmath.WallBit(d)
+	n := gridmath.Neighbor(c, d)
+	if n.X >= 0 && n.Y >= 0 && n.X < m.W && n.Y < m.H {
+		m.Walls[n.Y*m.W+n.X] |= gridmath.WallBit(gridmath.Opposite(d))
+	}
+}
+
+func TestChaserPicksNearestRunnerByPath(t *testing.T) {
+	maze := openMaze(5, 1)
+	wall(&maze, gridmath.Cell{X: 2, Y: 0}, protocol.DirRight)
+	g := gridmath.Grid{M: maze}
+	ch := NewChaser(1)
+	// {3.5,0.5} is euclid-nearest but walled off; the only path leads left.
+	runners := []gridmath.Vec{{X: 3.5, Y: 0.5}, {X: 0.5, Y: 0.5}}
+	if d := ch.Next(g, gridmath.Cell{X: 2, Y: 0}, protocol.DirRight, runners, nil); d != protocol.DirLeft {
+		t.Fatalf("want left toward reachable runner, got %s", d)
+	}
+}
+
+func TestChaserFirstStepFollowsMaze(t *testing.T) {
+	maze := openMaze(3, 3)
+	wall(&maze, gridmath.Cell{X: 0, Y: 0}, protocol.DirRight)
+	wall(&maze, gridmath.Cell{X: 1, Y: 0}, protocol.DirRight)
+	g := gridmath.Grid{M: maze}
+	ch := NewChaser(1)
+	runners := []gridmath.Vec{{X: 2.5, Y: 0.5}}
+	// Row 0 is blocked; the path must dip down to row 1 first.
+	if d := ch.Next(g, gridmath.Cell{X: 0, Y: 0}, protocol.DirNone, runners, nil); d != protocol.DirDown {
+		t.Fatalf("want down around the wall, got %s", d)
+	}
+	// From {0,1} the shortest path runs right along row 1 then up.
+	if d := ch.Next(g, gridmath.Cell{X: 0, Y: 1}, protocol.DirDown, runners, nil); d != protocol.DirRight {
+		t.Fatalf("want right along row 1, got %s", d)
+	}
+}
+
+func TestChaserReversesToPursue(t *testing.T) {
+	g := gridmath.Grid{M: openMaze(5, 1)}
+	ch := NewChaser(1)
+	runners := []gridmath.Vec{{X: 0.5, Y: 0.5}}
+	if d := ch.Next(g, gridmath.Cell{X: 2, Y: 0}, protocol.DirRight, runners, nil); d != protocol.DirLeft {
+		t.Fatalf("want reversal to left, got %s", d)
+	}
+}
+
+func TestChaserSameCellHeadsForRunner(t *testing.T) {
+	g := gridmath.Grid{M: openMaze(3, 3)}
+	ch := NewChaser(1)
+	cell := gridmath.Cell{X: 1, Y: 1}
+	if d := ch.Next(g, cell, protocol.DirNone, []gridmath.Vec{{X: 1.9, Y: 1.5}}, nil); d != protocol.DirRight {
+		t.Fatalf("want right toward offset runner, got %s", d)
+	}
+	if d := ch.Next(g, cell, protocol.DirNone, []gridmath.Vec{{X: 1.5, Y: 1.1}}, nil); d != protocol.DirUp {
+		t.Fatalf("want up toward offset runner, got %s", d)
+	}
+}
+
+func TestChaserFallsBackWithoutRunners(t *testing.T) {
+	g := gridmath.Grid{M: openMaze(3, 1)}
+	ch := NewChaser(1)
+	if d := ch.Next(g, gridmath.Cell{X: 1, Y: 0}, protocol.DirRight, nil, nil); d != protocol.DirRight {
+		t.Fatalf("corridor: want right, got %s", d)
+	}
+	if d := ch.Next(g, gridmath.Cell{X: 2, Y: 0}, protocol.DirRight, nil, nil); d != protocol.DirLeft {
+		t.Fatalf("dead end: want left, got %s", d)
+	}
+	// A runner that cannot be reached falls back to patrol too.
+	maze := openMaze(5, 1)
+	wall(&maze, gridmath.Cell{X: 2, Y: 0}, protocol.DirRight)
+	g = gridmath.Grid{M: maze}
+	cell := gridmath.Cell{X: 2, Y: 0}
+	runners := []gridmath.Vec{{X: 3.5, Y: 0.5}}
+	d := ch.Next(g, cell, protocol.DirLeft, runners, nil)
+	if d == protocol.DirNone || !g.CanMove(cell, d) {
+		t.Fatalf("unreachable runner: want a legal patrol move, got %s", d)
+	}
+}
+
+func TestDefaultBrainCatchesRunner(t *testing.T) {
+	gen := protocol.MazeGenerateResponse{
+		Maze: openMaze(5, 5), Seed: 7,
+		RunnerSpawns:  []protocol.Point{{X: 4.5, Y: 4.5}, {X: 4.5, Y: 0.5}},
+		CatcherSpawns: []protocol.Point{{X: 0.5, Y: 0.5}},
+	}
+	f := newFixture(t, gen, nil)
+	m, _, err := f.svc.CreateMatch(context.Background(), twoRunnerRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last StepResult
+	for i := 0; i < 40 && !last.Ended; i++ {
+		last = f.svc.Step(context.Background(), m)
+	}
+	if !last.Ended || last.End == nil {
+		t.Fatalf("match should end within 40 ticks, ended=%v", last.Ended)
+	}
+	if len(last.End.WinnerIDs) != 1 || last.End.WinnerIDs[0] != "p1" {
+		t.Fatalf("winner ids %+v", last.End.WinnerIDs)
+	}
+	var caught *protocol.Event
+	for _, raw := range f.rec.frames(protocol.TypeEvent) {
+		var ev protocol.Event
+		_ = json.Unmarshal(raw, &ev)
+		if ev.Kind == protocol.EventCaught {
+			caught = &ev
+		}
+	}
+	if caught == nil || caught.PlayerID != "p2" {
+		t.Fatalf("expected p2 to be caught first, events %+v", caught)
+	}
+}
+
+func TestChaserNextDoesNotAllocate(t *testing.T) {
+	g := gridmath.Grid{M: openMaze(31, 31)}
+	ch := NewChaser(1)
+	runners := []gridmath.Vec{
+		{X: 0.5, Y: 0.5}, {X: 30.5, Y: 0.5}, {X: 0.5, Y: 30.5}, {X: 30.5, Y: 30.5},
+		{X: 15.5, Y: 0.5}, {X: 15.5, Y: 30.5}, {X: 0.5, Y: 15.5}, {X: 30.5, Y: 15.5},
+	}
+	cell := gridmath.Cell{X: 15, Y: 15}
+	ch.Next(g, cell, protocol.DirUp, runners, nil)
+	allocs := testing.AllocsPerRun(100, func() {
+		ch.Next(g, cell, protocol.DirUp, runners, nil)
+	})
+	if allocs != 0 {
+		t.Fatalf("Next allocated %.2f times per call", allocs)
+	}
+}
+
+func BenchmarkChaserNext(b *testing.B) {
+	g := gridmath.Grid{M: openMaze(31, 31)}
+	runners := []gridmath.Vec{
+		{X: 0.5, Y: 0.5}, {X: 30.5, Y: 0.5}, {X: 0.5, Y: 30.5}, {X: 30.5, Y: 30.5},
+		{X: 15.5, Y: 0.5}, {X: 15.5, Y: 30.5}, {X: 0.5, Y: 15.5}, {X: 30.5, Y: 15.5},
+	}
+	chasers := make([]*Chaser, 50)
+	cells := make([]gridmath.Cell, 50)
+	for i := range chasers {
+		chasers[i] = NewChaser(int64(i))
+		cells[i] = gridmath.Cell{X: i % 31, Y: i / 31}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j, ch := range chasers {
+			ch.Next(g, cells[j], protocol.DirUp, runners, nil)
+		}
 	}
 }

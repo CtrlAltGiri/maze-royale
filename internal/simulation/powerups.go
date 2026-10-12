@@ -12,12 +12,21 @@ type pickup struct {
 	protocol.PowerUp
 	respawnTick int64
 	active      bool
+	noRespawn   bool
 }
 
 func (m *Match) initPowerUps() {
 	for i, kind := range []string{protocol.PowerUpSpeed, protocol.PowerUpInvisibility, protocol.PowerUpSpeed, protocol.PowerUpInvisibility} {
 		m.powerUps = append(m.powerUps, pickup{PowerUp: protocol.PowerUp{ID: fmt.Sprintf("power%d", i+1), Kind: kind}})
 	}
+	// The gun sits at the maze center from match start. It bypasses random
+	// placement: catchers spawn in the central region, so the 2-cell clearance
+	// rule in respawnPowerUps would never allow it there.
+	m.powerUps = append(m.powerUps, pickup{
+		PowerUp:   protocol.PowerUp{ID: "power5", Kind: protocol.PowerUpGun, X: m.center.X, Y: m.center.Y},
+		active:    true,
+		noRespawn: true,
+	})
 	m.respawnPowerUps()
 }
 
@@ -27,7 +36,7 @@ func (m *Match) respawnPowerUps() {
 	}
 	for i := range m.powerUps {
 		p := &m.powerUps[i]
-		if p.active || m.tick < p.respawnTick {
+		if p.active || p.noRespawn || m.tick < p.respawnTick {
 			continue
 		}
 		for _, n := range m.powerUpRNG.Perm(m.grid.M.W * m.grid.M.H) {
@@ -85,10 +94,14 @@ func (m *Match) collectPowerUps(r *runner) []json.RawMessage {
 			continue
 		}
 		duration := int64(protocol.PowerUpSpeedMS)
-		if p.Kind == protocol.PowerUpInvisibility {
+		switch p.Kind {
+		case protocol.PowerUpInvisibility:
 			duration = protocol.PowerUpInvisibilityMS
 			r.invisibleUntil = m.tick + duration/int64(protocol.TickMillis)
-		} else {
+		case protocol.PowerUpGun:
+			duration = 0
+			r.hasGun = true
+		default:
 			r.speedUntil = m.tick + duration/int64(protocol.TickMillis)
 		}
 		p.active = false

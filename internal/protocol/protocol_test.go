@@ -30,6 +30,7 @@ func TestRoundTripAllMessages(t *testing.T) {
 		&SetReady{T: TypeSetReady, Ready: true},
 		&StartRoom{T: TypeStartRoom},
 		&Input{T: TypeInput, Seq: 7, Dir: DirLeft},
+		&Shoot{T: TypeShoot},
 		&Ping{T: TypePing, TS: 1234},
 		&Welcome{T: TypeWelcome, PlayerID: "p1"},
 		&RoomState{T: TypeRoomState, Code: "ABCD", Config: cfg, Players: []RoomPlayer{{PlayerID: "p1", Name: "a", Color: "#fff", Ready: true, IsCreator: true}}, CountdownMS: 5000},
@@ -39,10 +40,14 @@ func TestRoundTripAllMessages(t *testing.T) {
 			Catchers: []MatchCatcher{{ID: "c1", X: 2.5, Y: 2.5}},
 			PowerUps: []PowerUp{{ID: "power1", Kind: PowerUpSpeed, X: 1.5, Y: 1.5}, {ID: "power2", Kind: PowerUpInvisibility, X: 0.5, Y: 2.5}},
 			RoundMS:  120000},
-		&Snapshot{T: TypeSnapshot, Tick: 10, TS: 99, Players: []SnapshotPlayer{{ID: "p1", X: 1.5, Y: 0.5, Dir: DirRight, Alive: true, SpeedBoostMS: 2500, InvisibleMS: 1000}},
-			Catchers: []SnapshotCatcher{{ID: "c1", X: 2.5, Y: 2.5, Dir: DirNone}},
-			PowerUps: []PowerUp{{ID: "power2", Kind: PowerUpInvisibility, X: 0.5, Y: 2.5}}, TimeLeftMS: 1000, AliveCount: 1},
+		&Snapshot{T: TypeSnapshot, Tick: 10, TS: 99, Players: []SnapshotPlayer{{ID: "p1", X: 1.5, Y: 0.5, Dir: DirRight, Alive: true, SpeedBoostMS: 2500, InvisibleMS: 1000, HasGun: true}},
+			Catchers: []SnapshotCatcher{{ID: "c1", X: 2.5, Y: 2.5, Dir: DirNone, DownMS: 1500}},
+			PowerUps: []PowerUp{{ID: "power2", Kind: PowerUpInvisibility, X: 0.5, Y: 2.5}},
+			Bullets:  []Bullet{{ID: "b1", X: 1.2, Y: 0.5, Dir: DirRight}}, TimeLeftMS: 1000, AliveCount: 1},
 		&Event{T: TypeEvent, Kind: EventCaught, PlayerID: "p1", CatcherID: "c1", Tick: 10},
+		&Event{T: TypeEvent, Kind: EventGunFired, PlayerID: "p1", Tick: 11},
+		&Event{T: TypeEvent, Kind: EventCatcherDown, CatcherID: "c1", Tick: 12, MS: 3000},
+		&Event{T: TypeEvent, Kind: EventCatcherRespawn, CatcherID: "c1", Tick: 72},
 		&Event{T: TypeEvent, Kind: EventPowerUpCollected, PlayerID: "p1", Tick: 10, MS: 5000, PowerUpID: "power1", PowerUpKind: PowerUpSpeed},
 		&Event{T: TypeEvent, Kind: EventCountdown, MS: 3000},
 		&MatchEnd{T: TypeMatchEnd, MatchID: "m1", WinnerIDs: []string{"p1"}, Standings: []Standing{{PlayerID: "p1", Name: "a", SurvivedMS: 5000, Place: 1}}},
@@ -67,18 +72,21 @@ func TestDecodeUnknownType(t *testing.T) {
 }
 
 func TestWireFieldNames(t *testing.T) {
-	raw, _ := Encode(Snapshot{T: TypeSnapshot, Players: []SnapshotPlayer{}, Catchers: []SnapshotCatcher{}, PowerUps: []PowerUp{}})
+	raw, _ := Encode(Snapshot{T: TypeSnapshot, Players: []SnapshotPlayer{}, Catchers: []SnapshotCatcher{}, PowerUps: []PowerUp{}, Bullets: []Bullet{}})
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"t", "tick", "ts", "players", "catchers", "power_ups", "time_left_ms", "alive_count"} {
+	for _, k := range []string{"t", "tick", "ts", "players", "catchers", "power_ups", "bullets", "time_left_ms", "alive_count"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("snapshot missing wire field %q in %s", k, raw)
 		}
 	}
 	if _, ok := m["power_ups"].([]any); !ok {
 		t.Errorf("power_ups must encode as [] not null in %s", raw)
+	}
+	if _, ok := m["bullets"].([]any); !ok {
+		t.Errorf("bullets must encode as [] not null in %s", raw)
 	}
 	raw, _ = Encode(RoomState{T: TypeRoomState, Players: []RoomPlayer{{}}})
 	if err := json.Unmarshal(raw, &m); err != nil {

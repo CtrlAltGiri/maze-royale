@@ -11,7 +11,7 @@ import (
 )
 
 // Version is the wire contract version. Bump only with docs/CONTRACT.md.
-const Version = "1"
+const Version = "2"
 
 // Message type tags, client -> gateway.
 const (
@@ -22,6 +22,7 @@ const (
 	TypeSetReady   = "set_ready"
 	TypeStartRoom  = "start_room"
 	TypeInput      = "input"
+	TypeShoot      = "shoot"
 	TypePing       = "ping"
 )
 
@@ -43,6 +44,9 @@ const (
 	EventCountdown        = "countdown"
 	EventBotJoined        = "bot_joined"
 	EventPowerUpCollected = "power_up_collected"
+	EventGunFired         = "gun_fired"
+	EventCatcherDown      = "catcher_down"
+	EventCatcherRespawn   = "catcher_respawn"
 )
 
 // Roles assigned to entities in a match.
@@ -90,9 +94,17 @@ const (
 	ServerTickHz = TickRate
 )
 
+// Gun power-up constants.
+const (
+	BulletSpeed   = 12.0 // cells per second; outruns the fastest catcher
+	BulletRadius  = CatchRadius
+	CatcherDownMS = 3000
+)
+
 const (
 	PowerUpSpeed           = "speed"
 	PowerUpInvisibility    = "invisibility"
+	PowerUpGun             = "gun"
 	PowerUpSpeedMultiplier = 1.5
 	PowerUpSpeedMS         = 5000
 	PowerUpInvisibilityMS  = 3000
@@ -105,6 +117,14 @@ type PowerUp struct {
 	Kind string  `json:"kind"`
 	X    float64 `json:"x"`
 	Y    float64 `json:"y"`
+}
+
+// Bullet is one live projectile in a snapshot.
+type Bullet struct {
+	ID  string    `json:"id"`
+	X   float64   `json:"x"`
+	Y   float64   `json:"y"`
+	Dir Direction `json:"dir"`
 }
 
 // Room configuration limits.
@@ -214,6 +234,10 @@ type Input struct {
 	T   string    `json:"t"`
 	Seq int64     `json:"seq"`
 	Dir Direction `json:"dir"`
+}
+
+type Shoot struct {
+	T string `json:"t"`
 }
 
 type Ping struct {
@@ -327,14 +351,16 @@ type SnapshotPlayer struct {
 	Alive        bool      `json:"alive"`
 	SpeedBoostMS int64     `json:"speed_boost_ms,omitempty"`
 	InvisibleMS  int64     `json:"invisible_ms,omitempty"`
+	HasGun       bool      `json:"has_gun,omitempty"`
 }
 
 // SnapshotCatcher is a catcher's authoritative state at a tick.
 type SnapshotCatcher struct {
-	ID  string    `json:"id"`
-	X   float64   `json:"x"`
-	Y   float64   `json:"y"`
-	Dir Direction `json:"dir"`
+	ID     string    `json:"id"`
+	X      float64   `json:"x"`
+	Y      float64   `json:"y"`
+	Dir    Direction `json:"dir"`
+	DownMS int64     `json:"down_ms,omitempty"`
 }
 
 type Snapshot struct {
@@ -344,15 +370,19 @@ type Snapshot struct {
 	Players    []SnapshotPlayer  `json:"players"`
 	Catchers   []SnapshotCatcher `json:"catchers"`
 	PowerUps   []PowerUp         `json:"power_ups"`
+	Bullets    []Bullet          `json:"bullets"`
 	TimeLeftMS int64             `json:"time_left_ms"`
 	AliveCount int               `json:"alive_count"`
 }
 
 // Event is a discrete in-match or lobby happening. Fields beyond Kind are
 // populated depending on Kind:
-//   - caught:     PlayerID (victim), CatcherID, Tick
-//   - countdown:  MS remaining until start
-//   - bot_joined: PlayerID, Name
+//   - caught:          PlayerID (victim), CatcherID, Tick
+//   - countdown:       MS remaining until start
+//   - bot_joined:      PlayerID, Name
+//   - gun_fired:       PlayerID, Tick
+//   - catcher_down:    CatcherID, Tick, MS down duration
+//   - catcher_respawn: CatcherID, Tick
 type Event struct {
 	T           string `json:"t"`
 	Kind        string `json:"kind"`
@@ -427,6 +457,8 @@ func Decode(raw []byte) (any, error) {
 		msg = &StartRoom{}
 	case TypeInput:
 		msg = &Input{}
+	case TypeShoot:
+		msg = &Shoot{}
 	case TypePing:
 		msg = &Ping{}
 	case TypeWelcome:

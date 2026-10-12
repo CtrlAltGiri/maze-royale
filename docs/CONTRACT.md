@@ -1,4 +1,4 @@
-# Maze Royale wire contract (frozen, v1)
+# Maze Royale wire contract (v2)
 
 Source of truth: `internal/protocol` (`protocol.go` for client frames, `services.go`
 for inter-service HTTP). This document mirrors it. **Fan-out agents must not edit
@@ -33,6 +33,7 @@ Every service answers `GET /healthz` -> `{service, version, ok}`.
 | `set_ready` | `ready` (bool) |
 | `start_room` | – (creator only) |
 | `input` | `seq` (int, monotonically increasing per client), `dir` ∈ `up`,`down`,`left`,`right`,`none` |
+| `shoot` | – |
 | `ping` | `ts` (client millis) |
 
 Clients send intent only. They never assert position. `hello` must precede
@@ -45,8 +46,8 @@ every frame except `ping`, which is answered with `pong` at any time.
 | `welcome` | `player_id` |
 | `room_state` | `code`, `config`, `players: [{player_id, name, color, ready, is_creator, is_bot?}]`, `countdown_ms` (0 when idle) |
 | `match_start` | `match_id`, `maze: {w, h, walls}`, `you: {player_id, role, color}`, `players: [{player_id, name, role, color, x, y, is_bot?}]`, `catchers: [{id, x, y}]`, `power_ups: [{id, kind, x, y}]`, `round_ms` |
-| `snapshot` | `tick`, `ts` (server millis), `players: [{id, x, y, dir, alive, speed_boost_ms?, invisible_ms?}]`, `catchers: [{id, x, y, dir}]`, `power_ups: [{id, kind, x, y}]`, `time_left_ms`, `alive_count` |
-| `event` | `kind` ∈ `caught` (`player_id`, `catcher_id`, `tick`), `countdown` (`ms`), `bot_joined` (`player_id`, `name`), `power_up_collected` (`player_id`, `tick`, `ms` effect duration, `power_up_id`, `power_up_kind`) |
+| `snapshot` | `tick`, `ts` (server millis), `players: [{id, x, y, dir, alive, speed_boost_ms?, invisible_ms?, has_gun?}]`, `catchers: [{id, x, y, dir, down_ms?}]`, `power_ups: [{id, kind, x, y}]`, `bullets: [{id, x, y, dir}]` (encoded `[]` when none), `time_left_ms`, `alive_count` |
+| `event` | `kind` ∈ `caught` (`player_id`, `catcher_id`, `tick`), `countdown` (`ms`), `bot_joined` (`player_id`, `name`), `power_up_collected` (`player_id`, `tick`, `ms` effect duration, `power_up_id`, `power_up_kind`), `gun_fired` (`player_id`, `tick`), `catcher_down` (`catcher_id`, `tick`, `ms` down duration), `catcher_respawn` (`catcher_id`, `tick`) |
 | `match_end` | `match_id`, `winner_ids: []`, `standings: [{player_id, name, survived_ms, place}]` |
 | `error` | `code`, `message` |
 | `pong` | `ts` (echo of ping) |
@@ -86,11 +87,14 @@ top left cell. Mazes are square and odd sized.
 - Countdown before first tick: 5000 ms.
 - Entities travel along cell centers; `gridmath.Grid.Step` is the reference
   movement function and must be used by the simulation.
+- Bullets travel 12.0 cells/s (`BulletSpeed`); a bullet within 0.45 cells
+  (`BulletRadius`) of a catcher downs it for 3000 ms (`CatcherDownMS`), after
+  which it respawns at the maze center.
 
 ### Power-ups
 
 The simulation spawns up to four maze pickups (stable ids `power1`..`power4`,
-two of each kind) on open cell centers at least 2 cells (euclidean) from every
+two each of `speed` and `invisibility`) on open cell centers at least 2 cells (euclidean) from every
 living runner and catcher; collected pickups respawn after 8000 ms under the
 same placement rules. `power_ups` lists only active pickups (encoded `[]` when
 none). A runner on the same cell within 0.35 cells collects the pickup:
@@ -99,6 +103,16 @@ none). A runner on the same cell within 0.35 cells collects the pickup:
   snapshot player; applies from the tick after collection).
 - `invisibility`: immune to catching and hidden from catcher brains for
   3000 ms (`invisible_ms` remaining; protects on the collection tick itself).
+
+A fifth pickup (stable id `power5`, kind `gun`) is always active at the maze
+center — it bypasses the random placement/clearance rules and never respawns
+once collected (one per match). Collecting it sets `has_gun` on the snapshot
+player. While holding the gun a runner may send `shoot`; on the next tick a
+bullet spawns at the runner's position travelling in the direction the runner
+is moving (else last direction moved, else current intent). If none of those
+yields a direction the gun is kept. Downed catchers neither move nor catch and
+report `down_ms` remaining; they respawn at the maze center when the down
+expires.
 
 Re-collecting the same kind refreshes the duration; both kinds can be active
 at once. Collection is announced with `event{kind:power_up_collected}`.
@@ -142,6 +156,7 @@ Matchmaking then runs the 5 s countdown (gateway learns of it through
 | `POST /matches` | `SimCreateMatchRequest {room_code, config, players}` -> `SimCreateMatchResponse {match_id, starts: {player_id: match_start}}` |
 | `GET /matches/{id}` | `SimMatchStateResponse {start (you.role = spectator), snapshot, ended}` |
 | `POST /matches/{id}/input` | `SimInputRequest {player_id, seq, dir}` |
+| `POST /matches/{id}/shoot` | `SimShootRequest {player_id}` |
 
 Simulation calls the maze service for the layout and pushes `snapshot`,
 `event` and `match_end` frames (as `GatewayPush` with `match_id` and `room_code` set) to the gateway with `POST /internal/push`

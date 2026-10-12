@@ -8,8 +8,9 @@ import (
 	"github.com/COG-GTM/riot-games-enablement-game/internal/protocol"
 )
 
-// Mover decides where a catcher goes. v1 ships a randomized walk; an AI
-// catcher implements this same interface and is swapped in at match creation.
+// Mover decides where a catcher goes. RandomWalk wanders; Chaser (the
+// default) pursues the nearest runner. Both are swapped in at match creation
+// via Config.NewMover.
 type Mover interface {
 	// Next is called once per tick when the catcher is at a cell center and
 	// must choose its direction. cur is the direction it was travelling

@@ -22,19 +22,23 @@ type runner struct {
 	pos             gridmath.Vec
 	want            protocol.Direction // latest intent
 	moving          protocol.Direction // direction actually travelled last tick
+	facing          protocol.Direction // last non-none direction travelled
 	seq             int64
 	alive           bool
 	survivedMS      int64
 	speedUntil      int64
 	invisibleUntil  int64
+	hasGun          bool
+	wantShot        bool
 }
 
 type catcher struct {
-	id    string
-	pos   gridmath.Vec
-	dir   protocol.Direction
-	speed float64
-	mover Mover
+	id        string
+	pos       gridmath.Vec
+	dir       protocol.Direction
+	speed     float64
+	mover     Mover
+	downUntil int64
 }
 
 // Match is one authoritative game. All methods are safe for concurrent use.
@@ -44,10 +48,12 @@ type Match struct {
 	id       string
 	roomCode string
 	grid     gridmath.Grid
+	center   gridmath.Vec
 	start    protocol.MatchStart // You left empty; filled per recipient
 	roundMS  int64
 	runners  []*runner
 	catchers []*catcher
+	bullets  []*bullet
 	tick     int64
 	ended    bool
 	winners  []string
@@ -99,6 +105,24 @@ func (m *Match) Input(playerID string, seq int64, dir protocol.Direction) bool {
 	return false
 }
 
+// Shoot records a player's intent to fire; the shot is resolved on the next
+// tick. Only live runners holding the gun can shoot.
+func (m *Match) Shoot(playerID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.runners {
+		if r.id != playerID {
+			continue
+		}
+		if !r.alive || !r.hasGun {
+			return false
+		}
+		r.wantShot = true
+		return true
+	}
+	return false
+}
+
 // StartFor returns the match_start frame addressed to playerID with the given role.
 func (m *Match) StartFor(playerID, role string) protocol.MatchStart {
 	m.mu.Lock()
@@ -142,6 +166,17 @@ func (m *Match) Step(nowMS int64) StepResult {
 
 	m.respawnPowerUps()
 	var frames []json.RawMessage
+	for _, c := range m.catchers {
+		if c.downUntil > 0 && m.tick >= c.downUntil {
+			c.pos = m.center
+			c.dir = protocol.DirNone
+			c.downUntil = 0
+			frames = append(frames, encode(protocol.Event{
+				T: protocol.TypeEvent, Kind: protocol.EventCatcherRespawn,
+				CatcherID: c.id, Tick: m.tick,
+			}))
+		}
+	}
 	var runnerPos []gridmath.Vec
 	for _, r := range m.runners {
 		if !r.alive {
@@ -152,10 +187,42 @@ func (m *Match) Step(nowMS int64) StepResult {
 			speed *= protocol.PowerUpSpeedMultiplier
 		}
 		r.pos, r.moving = m.grid.Step(r.pos, r.want, speed, tickDT)
+		if r.moving != protocol.DirNone {
+			r.facing = r.moving
+		}
 		frames = append(frames, m.collectPowerUps(r)...)
 		if m.tick >= r.invisibleUntil {
 			runnerPos = append(runnerPos, r.pos)
 		}
+	}
+	aim := func(d protocol.Direction) protocol.Direction {
+		switch d {
+		case protocol.DirUp, protocol.DirDown, protocol.DirLeft, protocol.DirRight:
+			return d
+		}
+		return protocol.DirNone
+	}
+	for _, r := range m.runners {
+		if !r.wantShot {
+			continue
+		}
+		r.wantShot = false
+		dir := aim(r.moving)
+		if dir == protocol.DirNone {
+			dir = aim(r.facing)
+		}
+		if dir == protocol.DirNone {
+			dir = aim(r.want)
+		}
+		if dir == protocol.DirNone {
+			continue
+		}
+		r.hasGun = false
+		m.bullets = append(m.bullets, &bullet{id: m.nextBulletID(), pos: r.pos, dir: dir})
+		frames = append(frames, encode(protocol.Event{
+			T: protocol.TypeEvent, Kind: protocol.EventGunFired,
+			PlayerID: r.id, Tick: m.tick,
+		}))
 	}
 	others := make([]gridmath.Vec, 0, len(m.catchers))
 	for i, c := range m.catchers {
@@ -165,10 +232,17 @@ func (m *Match) Step(nowMS int64) StepResult {
 				others = append(others, o.pos)
 			}
 		}
+		if m.tick < c.downUntil {
+			continue
+		}
 		m.moveCatcher(c, runnerPos, others)
 	}
+	frames = append(frames, m.moveBullets()...)
 
 	for _, c := range m.catchers {
+		if m.tick < c.downUntil {
+			continue
+		}
 		for _, r := range m.runners {
 			if r.alive && m.tick >= r.invisibleUntil && gridmath.Caught(c.pos, r.pos) {
 				r.alive = false
@@ -268,6 +342,7 @@ func (m *Match) snapshot(nowMS, timeLeft int64, alive int) protocol.Snapshot {
 		T: protocol.TypeSnapshot, Tick: m.tick, TS: nowMS,
 		Players:    make([]protocol.SnapshotPlayer, 0, len(m.runners)),
 		Catchers:   make([]protocol.SnapshotCatcher, 0, len(m.catchers)),
+		Bullets:    make([]protocol.Bullet, 0, len(m.bullets)),
 		TimeLeftMS: timeLeft, AliveCount: alive,
 	}
 	for _, r := range m.runners {
@@ -276,11 +351,14 @@ func (m *Match) snapshot(nowMS, timeLeft int64, alive int) protocol.Snapshot {
 			dir = protocol.DirNone
 		}
 		s.Players = append(s.Players, protocol.SnapshotPlayer{ID: r.id, X: r.pos.X, Y: r.pos.Y, Dir: dir, Alive: r.alive,
-			SpeedBoostMS: m.effectMS(r.speedUntil), InvisibleMS: m.effectMS(r.invisibleUntil)})
+			SpeedBoostMS: m.effectMS(r.speedUntil), InvisibleMS: m.effectMS(r.invisibleUntil), HasGun: r.hasGun})
 	}
 	s.PowerUps = m.activePowerUps()
 	for _, c := range m.catchers {
-		s.Catchers = append(s.Catchers, protocol.SnapshotCatcher{ID: c.id, X: c.pos.X, Y: c.pos.Y, Dir: c.dir})
+		s.Catchers = append(s.Catchers, protocol.SnapshotCatcher{ID: c.id, X: c.pos.X, Y: c.pos.Y, Dir: c.dir, DownMS: m.effectMS(c.downUntil)})
+	}
+	for _, b := range m.bullets {
+		s.Bullets = append(s.Bullets, protocol.Bullet{ID: b.id, X: b.pos.X, Y: b.pos.Y, Dir: b.dir})
 	}
 	return s
 }

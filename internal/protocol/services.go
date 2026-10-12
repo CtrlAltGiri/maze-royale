@@ -107,6 +107,11 @@ type SimInputRequest struct {
 	Dir      Direction `json:"dir"`
 }
 
+// SimShootRequest: POST /matches/{id}/shoot
+type SimShootRequest struct {
+	PlayerID string `json:"player_id"`
+}
+
 // SimMatchStateResponse: GET /matches/{id}. Used for reconnect as spectator.
 type SimMatchStateResponse struct {
 	Start    MatchStart `json:"start"` // You is filled with role spectator

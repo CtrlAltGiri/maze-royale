@@ -222,6 +222,8 @@ func (s *Server) dispatch(ctx context.Context, c *conn, raw []byte) {
 		s.finishRoomMutation(ctx, c, &res, err)
 	case *protocol.Input:
 		s.onInput(ctx, c, m)
+	case *protocol.Shoot:
+		s.onShoot(ctx, c, m)
 	default:
 		c.sendError(ctx, protocol.ErrUnsupported, fmt.Sprintf("unexpected client frame %T", msg))
 	}
@@ -344,6 +346,35 @@ func (s *Server) onInput(ctx context.Context, c *conn, m *protocol.Input) {
 		defer cancel()
 		if err := s.sim.Post(bctx, "/matches/"+matchID+"/input", req, nil); err != nil {
 			log.Printf("[gateway] rid=%s input %s: %v", rid, c.playerID, err)
+		}
+	}()
+}
+
+func (s *Server) onShoot(ctx context.Context, c *conn, _ *protocol.Shoot) {
+	code, ok := s.roomOf(c.playerID)
+	if !ok {
+		c.sendError(ctx, protocol.ErrNotInRoom, "not in a room")
+		return
+	}
+	matchID, spectator := s.matchAndRole(code, c.playerID)
+	if matchID == "" {
+		c.sendError(ctx, protocol.ErrBadRequest, "room is not in a match")
+		return
+	}
+	if spectator {
+		c.sendError(ctx, protocol.ErrForbidden, "spectators cannot send input")
+		return
+	}
+	req := protocol.SimShootRequest{PlayerID: c.playerID}
+	rid := httpx.RequestIDFrom(ctx)
+	if rid == "" {
+		rid = httpx.NewRequestID()
+	}
+	go func() {
+		bctx, cancel := context.WithTimeout(httpx.WithRequestID(context.Background(), rid), writeTimeout)
+		defer cancel()
+		if err := s.sim.Post(bctx, "/matches/"+matchID+"/shoot", req, nil); err != nil {
+			log.Printf("[gateway] rid=%s shoot %s: %v", rid, c.playerID, err)
 		}
 	}()
 }

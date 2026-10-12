@@ -56,8 +56,9 @@ export function startGame(net, matchStart, hooks = {}) {
   const hudPowers = el('span', 'hud-powers');
   const speedEffect = el('span', 'power-badge speed');
   const invisibleEffect = el('span', 'power-badge invisibility');
-  const powerHint = el('span', 'power-hint', 'Pickups: gold bolt = 1.5× speed / 5s · violet ring = invisible to catchers / 3s');
-  hudPowers.append(speedEffect, invisibleEffect, powerHint);
+  const gunEffect = el('span', 'power-badge gun', 'Gun · Space to fire');
+  const powerHint = el('span', 'power-hint', 'Pickups: gold bolt = 1.5× speed / 5s · violet ring = invisible to catchers / 3s · orange gun = fire with Space');
+  hudPowers.append(speedEffect, invisibleEffect, gunEffect, powerHint);
   hud.append(hudPowers);
 
   let banner = document.getElementById('spectator-banner');
@@ -87,6 +88,7 @@ export function startGame(net, matchStart, hooks = {}) {
     players: (matchStart.players || []).map(p => ({ id: p.player_id, x: p.x, y: p.y, dir: 'none', alive: true })),
     catchers: (matchStart.catchers || []).map(c => ({ id: c.id, x: c.x, y: c.y, dir: 'none' })),
     power_ups: matchStart.power_ups || [],
+    bullets: [],
   };
   cur = initial; prev = initial; curAt = performance.now();
 
@@ -107,11 +109,13 @@ export function startGame(net, matchStart, hooks = {}) {
     const me = (cur.players || []).find(p => p.id === myId && p.alive);
     const speedMS = !spectating && me ? me.speed_boost_ms || 0 : 0;
     const invisibleMS = !spectating && me ? me.invisible_ms || 0 : 0;
+    const hasGun = !spectating && me ? !!me.has_gun : false;
     speedEffect.hidden = speedMS <= 0;
     invisibleEffect.hidden = invisibleMS <= 0;
+    gunEffect.hidden = !hasGun;
     speedEffect.textContent = `Speed ×1.5 · ${(speedMS / 1000).toFixed(1)}s`;
     invisibleEffect.textContent = `Invisible · ${(invisibleMS / 1000).toFixed(1)}s`;
-    powerHint.hidden = speedMS > 0 || invisibleMS > 0;
+    powerHint.hidden = speedMS > 0 || invisibleMS > 0 || hasGun;
     if (spectating) {
       const you = matchStart.you || {};
       const caught = deaths.has(myId) || deadIds.has(myId);
@@ -174,7 +178,18 @@ export function startGame(net, matchStart, hooks = {}) {
   }
   function onKeyDown(e) {
     const dir = KEY_DIRS[e.key];
-    if (!dir) return;
+    if (!dir) {
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (spectating || ended || e.repeat) return;
+        const me = (cur.players || []).find(p => p.id === myId && p.alive);
+        if (me && me.has_gun) {
+          if (typeof net.shoot === 'function') net.shoot();
+          else net.send({ t: 'shoot' });
+        }
+      }
+      return;
+    }
     e.preventDefault();
     if (spectating || ended) return;
     if (e.repeat) return;
@@ -206,6 +221,7 @@ export function startGame(net, matchStart, hooks = {}) {
     const alpha = Math.min(1, Math.max(0, (now - curAt) / interpMs));
     const prevById = new Map((prev.players || []).map(p => [p.id, p]));
     const prevCatch = new Map((prev.catchers || []).map(c => [c.id, c]));
+    const prevBullets = new Map((prev.bullets || []).map(b => [b.id, b]));
 
     const runners = [];
     for (const p of cur.players || []) {
@@ -236,9 +252,14 @@ export function startGame(net, matchStart, hooks = {}) {
     const catchers = [];
     for (const c of cur.catchers || []) {
       const q = prevCatch.get(c.id) || c;
-      catchers.push({ x: lerp(q.x, c.x, alpha), y: lerp(q.y, c.y, alpha), dir: c.dir });
+      catchers.push({ x: lerp(q.x, c.x, alpha), y: lerp(q.y, c.y, alpha), dir: c.dir, down: (c.down_ms || 0) > 0 });
     }
-    drawFrame(ctx, canvas, { maze: matchStart.maze, runners, catchers, powerUps: cur.power_ups || [], now });
+    const bullets = [];
+    for (const b of cur.bullets || []) {
+      const q = prevBullets.get(b.id) || b;
+      bullets.push({ x: lerp(q.x, b.x, alpha), y: lerp(q.y, b.y, alpha), dir: b.dir });
+    }
+    drawFrame(ctx, canvas, { maze: matchStart.maze, runners, catchers, powerUps: cur.power_ups || [], bullets, now });
     raf = requestAnimationFrame(frame);
   }
   raf = requestAnimationFrame(frame);
